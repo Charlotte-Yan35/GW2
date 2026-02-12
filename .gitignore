@@ -3,3 +3,4 @@ data/
 .claude/
 Reference/
 .DS_Store
+*.pkl
