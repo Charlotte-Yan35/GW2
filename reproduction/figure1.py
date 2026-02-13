@@ -26,7 +26,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 N = 50            # 节点数
 K_BAR = 4         # 平均度 ⟨k⟩=4 (Watts-Strogatz 小世界网络)
 PMAX = 1.0        # 归一化最大功率
-REALIZATIONS = 10  # 每配置点的实现数 (论文用 200)
+REALIZATIONS = 100  # 每配置点的实现数 (论文用 200) 此处暂时用了100
 CACHE_DIR = Path(__file__).parent / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 
@@ -122,7 +122,7 @@ def integrate_swing(A, P, n, kappa, y0, I=1.0, D=1.0, t_max=200.0):
     return False, y_final
 
 
-def find_kappa_c(A, P, n, kappa_start=5.5, step_init=0.01, tol=1e-3):
+def find_kappa_c(A, P, n, kappa_start=5.5, step_init=0.1, tol=1e-3):
     """
     Find critical coupling κ_c using the reference algorithm:
     Start from high κ, integrate to steady state, then decrease κ with warm-starting.
