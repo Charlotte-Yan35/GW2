@@ -26,7 +26,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 N = 50            # 节点数
 K_BAR = 4         # 平均度 ⟨k⟩=4 (Watts-Strogatz 小世界网络)
 PMAX = 1.0        # 归一化最大功率
-REALIZATIONS = 50  # 每配置点的实现数 (论文用 200)
+REALIZATIONS = 10  # 每配置点的实现数 (论文用 200)
 CACHE_DIR = Path(__file__).parent / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 
@@ -79,63 +79,89 @@ def assign_powers(n, n_plus, n_minus, Pmax):
     return P
 
 
-def find_steady_state_ode(A, P, n, kappa, gamma=1.0, t_max=200.0, tol=1e-4):
+def compute_steady_state_residual(theta, A, P, kappa):
     """
-    Numerically integrate the second-order swing equation with damping γ=1:
-      d²θ/dt² + γ·dθ/dt = P - κ·Σ_j A_ij·sin(θ_i - θ_j)
-    Returns True if ODE converges to a stable steady state, False otherwise.
+    Compute power balance residual: P_i - κ·Σ_j A_ij·sin(θ_i - θ_j)
+    Reference: fsteadystate() in swing.jl
+    """
+    diff = theta[:, None] - theta[None, :]
+    coupling = np.sum(A * np.sin(diff), axis=1)
+    return P - kappa * coupling
+
+
+def integrate_swing(A, P, n, kappa, y0, I=1.0, D=1.0, t_max=200.0):
+    """
+    Integrate the second-order swing equation:
+      I·dω/dt = P - D·ω - κ·Σ_j A_ij·sin(θ_i - θ_j)
+      dθ/dt = ω
+    State: y = [ω_1..ω_n, θ_1..θ_n]  (reference convention: ω first, θ second)
+    Returns (converged, y_final).
     """
     def rhs(t, y):
-        theta = y[:n]
-        omega = y[n:]
+        omega = y[:n]
+        theta = y[n:]
         diff = theta[:, None] - theta[None, :]
         coupling = np.sum(A * np.sin(diff), axis=1)
+        domega = (P - D * omega - kappa * coupling) / I
         dtheta = omega
-        domega = P - gamma * omega - kappa * coupling
-        return np.concatenate([dtheta, domega])
+        return np.concatenate([domega, dtheta])
 
-    y0 = np.zeros(2 * n)  # θ=0, ω=0 (all at rest)
     sol = solve_ivp(rhs, [0, t_max], y0, method='RK45',
-                    rtol=1e-6, atol=1e-8, max_step=1.0)
+                    rtol=1e-8, atol=1e-8, max_step=1.0)
 
     if sol.status != 0:
-        return False
+        return False, y0
 
-    theta_final = sol.y[:n, -1]
-    omega_final = sol.y[n:, -1]
+    y_final = sol.y[:, -1]
+    theta_final = y_final[n:]
 
-    # Check convergence: all frequencies near zero
-    if np.max(np.abs(omega_final)) > tol:
-        return False
-
-    # Check stability: |θ_i - θ_j| < π/2 for all edges
-    rows, cols = np.where(np.triu(A, k=1) > 0)
-    if len(rows) > 0:
-        if not np.all(np.abs(theta_final[rows] - theta_final[cols]) < np.pi / 2):
-            return False
-
-    return True
+    # Check convergence: power balance residual (reference criterion)
+    resid = compute_steady_state_residual(theta_final, A, P, kappa)
+    if np.linalg.norm(resid, 2) < 1e-5:
+        return True, y_final
+    return False, y_final
 
 
-def find_kappa_c(A, P, n, kappa_min=0.01, kappa_max=5.0, tol=0.005, max_iter=40):
+def find_kappa_c(A, P, n, kappa_start=5.5, step_init=0.01, tol=1e-3):
     """
-    Binary search for critical coupling κ_c using ODE integration.
-    κ_c is the smallest κ for which the swing equation converges to a stable steady state.
+    Find critical coupling κ_c using the reference algorithm:
+    Start from high κ, integrate to steady state, then decrease κ with warm-starting.
+    When convergence fails, halve step size and back up.
+    Reference: criticalcouplingbisection() in swing.jl
     """
-    # First check: if even kappa_max doesn't converge, return NaN
-    if not find_steady_state_ode(A, P, n, kappa_max):
+    kappa = kappa_start
+
+    # First: integrate at high κ with random IC to find steady state
+    y0 = np.random.rand(2 * n)
+    converged, y_last = integrate_swing(A, P, n, kappa, y0, t_max=200.0)
+    if not converged:
         return np.nan
 
-    lo, hi = kappa_min, kappa_max
-    for _ in range(max_iter):
-        mid = (lo + hi) / 2
-        if find_steady_state_ode(A, P, n, mid):
-            hi = mid
+    stepsize = step_init
+    kappa_old = kappa
+
+    while True:
+        # Try current κ with warm-started IC
+        converged, y_sol = integrate_swing(A, P, n, kappa, y_last, t_max=100.0)
+
+        if converged:
+            y_last = y_sol  # warm-start for next step
+
+            # If bisection done (step small enough), return
+            if stepsize < tol:
+                return kappa
+
+            # Decrease κ
+            kappa_old = kappa
+            kappa = kappa - stepsize
         else:
-            lo = mid
-        if hi - lo < tol:
-            break
-    return hi
+            # Failed: halve step size and back up
+            stepsize = stepsize / 2.0
+            kappa = kappa_old - stepsize
+
+        # Safety: if κ goes negative or step too small
+        if kappa < 0 or stepsize < 1e-6:
+            return kappa_old
 
 
 def compute_kappa_c_single(args):
@@ -269,7 +295,7 @@ def plot_panel_b(ax):
 def compute_panel_c_data(n=N, K_bar=K_BAR, q=0.0, Pmax=PMAX,
                          realizations=REALIZATIONS, step=2):
     """遍历所有 n_+ + n_- + n_p = n 的配置 (step 间隔)。"""
-    cache_file = CACHE_DIR / f"v3_panel_c_n{n}_k{K_bar}_q{q}_r{realizations}_s{step}.npz"
+    cache_file = CACHE_DIR / f"v4_panel_c_n{n}_k{K_bar}_q{q}_r{realizations}_s{step}.npz"
     if cache_file.exists():
         data = np.load(cache_file)
         return data['configs'], data['kappa_c_vals']
@@ -330,13 +356,15 @@ def plot_panel_c(ax, configs, kappa_c_vals, n=N):
         cb = plt.colorbar(tcf, ax=ax, shrink=0.7)
         cb.set_label(r'$\overline{\kappa}_c$', fontsize=11)
 
-    # (i) 截面虚线 (n_p=0 底边)
-    x0, y0 = ternary_to_cart(n, 0, 0)
-    x1, y1 = ternary_to_cart(0, n, 0)
+    # (i) 截面虚线 (n_p=15, matching reference cross-section)
+    n_passive_section = 15
+    x0, y0 = ternary_to_cart(n - n_passive_section, 0, n_passive_section)
+    x1, y1 = ternary_to_cart(0, n - n_passive_section, n_passive_section)
     ax.plot([x0, x1], [y0, y1], 'b--', lw=1.0, zorder=3)
     xm = 0.5 * (x0 + x1)
-    ax.text(xm, -0.04, "(i)", fontsize=8, ha='center', fontstyle='italic',
-            color='blue')
+    ym = 0.5 * (y0 + y1)
+    ax.text(xm - 0.08, ym - 0.02, "(i)", fontsize=8, ha='center',
+            fontstyle='italic', color='blue')
 
     # --- 三边标签 ---
     # 左边: ← Generators
@@ -362,16 +390,21 @@ def plot_panel_c(ax, configs, kappa_c_vals, n=N):
 # Panel D: 截面图 κ̄_c vs consumers
 # ============================================================
 
-def compute_panel_d_data(n=N, K_bar=K_BAR, Pmax=PMAX, realizations=REALIZATIONS):
-    """n_p=0 截面, 不同 q 值。返回均值和标准差。"""
-    cache_file = CACHE_DIR / f"v3_panel_d_n{n}_k{K_bar}_r{realizations}.npz"
+def compute_panel_d_data(n=N, K_bar=K_BAR, Pmax=PMAX, realizations=REALIZATIONS,
+                         n_passive=15):
+    """
+    Cross-section with fixed n_passive (reference uses n_p=15).
+    n_+ + n_- = n - n_passive, consumers range from 1 to n-n_passive-1.
+    """
+    cache_file = CACHE_DIR / f"v4_panel_d_n{n}_k{K_bar}_np{n_passive}_r{realizations}.npz"
     if cache_file.exists():
         data = np.load(cache_file, allow_pickle=True)
         return (data['q_values'], data['n_minus_range'],
                 data['kappa_c_mean'], data['kappa_c_std'])
 
     q_values = np.array([0.0, 0.1, 0.4, 1.0])
-    n_minus_range = np.arange(1, n, 1)  # consumers 1 to n-1
+    n_active = n - n_passive
+    n_minus_range = np.arange(1, n_active, 1)  # consumers 1 to n_active-1
 
     kappa_c_mean = np.full((len(q_values), len(n_minus_range)), np.nan)
     kappa_c_std = np.full((len(q_values), len(n_minus_range)), np.nan)
@@ -381,7 +414,7 @@ def compute_panel_d_data(n=N, K_bar=K_BAR, Pmax=PMAX, realizations=REALIZATIONS)
         for qi, q in enumerate(q_values):
             print(f"Panel D: q={q}")
             for ni, n_minus in enumerate(n_minus_range):
-                n_plus = n - n_minus
+                n_plus = n_active - n_minus
                 mean_val, std_val = compute_kappa_c_stats_parallel(
                     n, K_bar, q, n_plus, n_minus, Pmax, realizations, pool
                 )
@@ -395,19 +428,21 @@ def compute_panel_d_data(n=N, K_bar=K_BAR, Pmax=PMAX, realizations=REALIZATIONS)
 
 
 def plot_panel_d(ax, q_values, n_minus_range, kappa_c_mean, kappa_c_std):
-    """匹配论文 Panel D 风格: 仅曲线 + (i) 标注, 无置信带。"""
+    """匹配论文 Panel D 风格: 曲线 + 置信带 + (i) 标注。"""
     colors = ['#e8850c', '#4a7ebb', '#2ca02c', '#d62728']
-    lws = [2.0, 1.5, 1.5, 1.5]
+    lws = [2.5, 2.0, 2.0, 2.0]
 
     for qi, q in enumerate(q_values):
         valid = ~np.isnan(kappa_c_mean[qi])
         x = n_minus_range[valid]
         y = kappa_c_mean[qi, valid]
+        s = kappa_c_std[qi, valid]
 
         ax.plot(x, y, color=colors[qi], lw=lws[qi], label=f'$q = {q}$')
+        ax.fill_between(x, y - s, y + s, color=colors[qi], alpha=0.3)
 
     ax.set_xlabel("Consumers", fontsize=12)
-    ax.set_ylabel(r"$\overline{\kappa}_c$", fontsize=12)
+    ax.set_ylabel(r"$\overline{\kappa}_c$", fontsize=12, rotation=0, labelpad=20)
     ax.legend(fontsize=9, loc='upper right', framealpha=0.9)
     ax.text(0.15, 0.92, "(i)", transform=ax.transAxes, fontsize=10,
             fontstyle='italic')
