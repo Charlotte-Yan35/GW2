@@ -470,7 +470,8 @@ def main():
         n=N, K_bar=K_BAR, Pmax=PMAX, realizations=REALIZATIONS
     )
 
-    out_dir = Path(__file__).parent
+    out_dir = Path(__file__).parent / "output"
+    out_dir.mkdir(exist_ok=True)
 
     # --- Figure AB ---
     print("\n--- Assembling Figure AB ---")

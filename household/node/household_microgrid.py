@@ -13,6 +13,7 @@ Produces a 6-day time-series plot similar to the reference figure.
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from pathlib import Path
 from datetime import datetime, timedelta
 
 # ─── Simulation Parameters ───────────────────────────────────────────
@@ -251,11 +252,12 @@ ax2.xaxis.set_major_locator(mdates.DayLocator())
 plt.xticks(rotation=0)
 
 plt.tight_layout()
-plt.savefig('household_microgrid.png', dpi=150, bbox_inches='tight')
-#plt.savefig('/sessions/modest-clever-euler/mnt/outputs/household_microgrid.png', dpi=150, bbox_inches='tight')
+_OUT_DIR = Path(__file__).parent / "output"
+_OUT_DIR.mkdir(exist_ok=True)
+plt.savefig(_OUT_DIR / 'household_microgrid.png', dpi=150, bbox_inches='tight')
 plt.show()
 
-print("\n✓ Plot saved to household_microgrid.png")
+print(f"\n✓ Plot saved to {_OUT_DIR / 'household_microgrid.png'}")
 
 # ─── Summary Statistics ─────────────────────────────────────────────
 total_gen = np.sum(generation) * dt_hours

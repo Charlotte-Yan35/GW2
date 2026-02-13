@@ -14,7 +14,9 @@ plt.rcParams.update({
     'axes.titlesize': 13,
     'axes.labelsize': 11,
 })
-OUT_DIR = Path(__file__).parent
+DATA_DIR = Path(__file__).parent
+OUT_DIR = Path(__file__).parent / "output"
+OUT_DIR.mkdir(exist_ok=True)
 SEASON_ORDER = ['Spring', 'Summer', 'Autumn', 'Winter']
 SEASON_COLORS = {'Spring': '#2ecc71', 'Summer': '#e74c3c',
                  'Autumn': '#e67e22', 'Winter': '#3498db'}
@@ -24,7 +26,7 @@ MONTH_TO_SEASON = {3: 'Spring', 4: 'Spring', 5: 'Spring',
                    12: 'Winter', 1: 'Winter', 2: 'Winter'}
 
 # ── 数据读取与预处理 ──────────────────────────────────
-df = pd.read_pickle(OUT_DIR / 'hourly_data.pkl')
+df = pd.read_pickle(DATA_DIR / 'hourly_data.pkl')
 df['P_GEN_AVG'] = (df['P_GEN_MIN'] + df['P_GEN_MAX']) / 2
 df['hour'] = df['t_h'].astype(int)
 df['month'] = df['d_m'].astype(int)
