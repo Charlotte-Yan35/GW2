@@ -39,13 +39,14 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 class SweepConfig:
     panel: str
     variable_name: str
+    variable_label: str          # LaTeX label for legend header
     values: tuple[float, ...]
     n: int | None = None
     gamma: float | None = None
     kappa: float | None = None
     q: float | None = None
     y_max: float = 30.0
-    cmap: str = "Reds"
+    color: str = "#c24c51"       # fixed line color (alpha varies)
 
 
 def build_incidence(n: int, edges: list[tuple[int, int]]) -> np.ndarray:
@@ -427,42 +428,46 @@ def panel_configs() -> dict[str, SweepConfig]:
         "A": SweepConfig(
             panel="A",
             variable_name="n",
+            variable_label="$n$",
             values=tuple(float(x) for x in np.arange(45, 105, 5)),
             gamma=1.0,
             kappa=1.0,
             q=0.1,
-            y_max=30.0,
-            cmap="Reds",
+            y_max=35.0,
+            color="#c24c51",
         ),
         "B": SweepConfig(
             panel="B",
             variable_name="gamma",
+            variable_label=r"$\gamma$",
             values=tuple(float(x) for x in np.round(np.arange(0.3, 2.1 + 1e-9, 0.1), 1)),
             n=50,
             kappa=1.0,
             q=0.1,
-            y_max=80.0,
-            cmap="Blues",
+            y_max=90.0,
+            color="#4c70b0",
         ),
         "C": SweepConfig(
             panel="C",
             variable_name="kappa",
+            variable_label=r"$\kappa$",
             values=tuple(float(x) for x in np.round(np.arange(0.1, 1.1 + 1e-9, 0.1), 1)),
             n=50,
             gamma=1.0,
             q=0.1,
-            y_max=60.0,
-            cmap="Greys",
+            y_max=70.0,
+            color="k",
         ),
         "D": SweepConfig(
             panel="D",
             variable_name="q",
+            variable_label="$q$",
             values=tuple(float(x) for x in np.round(np.arange(0.0, 1.0 + 1e-9, 0.1), 1)),
             n=50,
             gamma=1.0,
             kappa=1.0,
             y_max=40.0,
-            cmap="PuRd",
+            color="#97015E",
         ),
     }
 
@@ -484,7 +489,9 @@ def cache_file_name(
     seed: int,
 ) -> Path:
     v = fmt_value(value).replace(".", "p")
-    return CACHE_DIR / (
+    subdir = CACHE_DIR / "figS2"
+    subdir.mkdir(exist_ok=True)
+    return subdir / (
         f"figS2_{panel}_{variable_name}{v}_e{ensemble_size}_"
         f"a{fmt_value(alpha_min).replace('.', 'p')}-{fmt_value(alpha_max).replace('.', 'p')}_"
         f"r{alpha_res}_s{seed}.npz"
@@ -584,36 +591,64 @@ def compute_or_load_curves(
 
 
 def plot_panel(ax: plt.Axes, config: SweepConfig, curves: list[dict]) -> None:
+    from matplotlib.lines import Line2D
+
     values = [c["value"] for c in curves]
-    order = np.argsort(values)
-    cmap = plt.get_cmap(config.cmap)
+    order = np.argsort(values)  # ascending
     n = len(curves)
+    # Alpha range: lowest value -> most transparent, highest -> most opaque
+    alpha_lo, alpha_hi = (0.2, 1.0) if n > 5 else (0.3, 1.0)
+
     for rank, idx in enumerate(order):
         c = curves[idx]
-        color = cmap(0.25 + 0.65 * rank / max(1, n - 1))
-        ax.plot(c["alpha"], c["tbar"], color=color, lw=1.3)
+        a = alpha_lo + (alpha_hi - alpha_lo) * rank / max(1, n - 1)
+        ax.plot(c["alpha"], c["tbar"], color=config.color, alpha=a, lw=1.3)
 
     ax.set_xlim(0.5, 2.5)
     ax.set_ylim(0.0, config.y_max)
     ax.set_xlabel(r"$\alpha/\alpha_{\ast}$")
     ax.set_ylabel(r"$\overline{T}$", rotation=0, labelpad=10)
-    ax.grid(alpha=0.25)
     ax.set_title(config.panel, loc="left", fontweight="bold")
 
-    # Compact legend labels similar to the supplementary figure style.
+    # Build legend with select values + "..." ellipsis, matching the paper style.
     vals_sorted = sorted(values)
-    if len(vals_sorted) > 8:
-        shown = [vals_sorted[-1], vals_sorted[-3], vals_sorted[-5], vals_sorted[2], vals_sorted[0]]
+    if n > 6:
+        # Show top 2, ellipsis, bottom 2  (descending in legend)
+        shown_top = vals_sorted[-1::-1][:2]    # two largest
+        shown_bot = vals_sorted[:2][::-1]       # two smallest (descending)
+        legend_entries: list[tuple[float | None, str]] = []
+        for v in shown_top:
+            legend_entries.append((v, fmt_value(v)))
+        legend_entries.append((None, r"$\vdots$"))
+        for v in shown_bot:
+            legend_entries.append((v, fmt_value(v)))
     else:
-        shown = vals_sorted[::-1]
-    labels = ", ".join(fmt_value(x) for x in shown)
-    ax.text(
-        1.02,
-        0.95,
-        f"{config.variable_name}: {labels}",
-        transform=ax.transAxes,
-        va="top",
+        legend_entries = [(v, fmt_value(v)) for v in vals_sorted[::-1]]
+
+    handles: list[Line2D | plt.Text] = []
+    labels: list[str] = []
+    for v, label in legend_entries:
+        if v is None:
+            # Dummy invisible handle; label is the ellipsis
+            h = Line2D([], [], color="none", marker="none", linestyle="None")
+        else:
+            rank_v = vals_sorted.index(v)
+            a = alpha_lo + (alpha_hi - alpha_lo) * rank_v / max(1, n - 1)
+            h = Line2D([], [], color=config.color, alpha=a, lw=2)
+        handles.append(h)
+        labels.append(label)
+
+    leg = ax.legend(
+        handles,
+        labels,
+        title=config.variable_label,
+        loc="upper left",
+        bbox_to_anchor=(1.0, 1.0),
+        frameon=False,
         fontsize=9,
+        title_fontsize=10,
+        handlelength=1.5,
+        labelspacing=0.4,
     )
 
 
@@ -630,7 +665,7 @@ def parse_panels(panels_str: str) -> list[str]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Reproduce Supplementary Figure S2.")
-    parser.add_argument("--ensemble-size", type=int, default=50)
+    parser.add_argument("--ensemble-size", type=int, default=200)
     parser.add_argument("--alpha-min", type=float, default=0.5)
     parser.add_argument("--alpha-max", type=float, default=2.5)
     parser.add_argument("--alpha-res", type=int, default=50)
@@ -673,8 +708,12 @@ def main() -> None:
         print("Compute finished. Use --mode plot or --mode both to render figure.")
         return
 
+    # Set font style to match the paper.
+    matplotlib.rc("font", size=12)
+    matplotlib.rc("mathtext", fontset="cm")
+
     # Always render a 2x2 layout; for skipped panels we leave blank axes.
-    fig, axes = plt.subplots(2, 2, figsize=(10.2, 7.2))
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7.5))
     grid = [["A", "B"], ["C", "D"]]
     for r in range(2):
         for c in range(2):
@@ -686,7 +725,7 @@ def main() -> None:
                 ax.axis("off")
                 ax.text(0.5, 0.5, f"Panel {pid} skipped", ha="center", va="center")
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 0.92, 1])
     out_png = Path(args.out)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     out_pdf = out_png.with_suffix(".pdf")
