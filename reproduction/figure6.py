@@ -22,6 +22,7 @@ from scipy.sparse.csgraph import connected_components as scipy_cc
 from scipy.sparse import csr_matrix
 from pathlib import Path
 from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
 import warnings
 import sys
 
@@ -511,14 +512,9 @@ def compute_simplex_heatmap(n=N_NODES, ensemble_size=ENSEMBLE_SIZE, seed=42,
                             n_workers=None):
     """
     Compute ρ̄ for all valid (ns, nd, ne) on the simplex.
-    Cache results to npz. Supports parallel computation.
+    Cache results to npz. Supports parallel computation and resume.
     """
     cache_file = CACHE_DIR / f"fig6_rho_heatmap_n{n}.npz"
-
-    if cache_file.exists():
-        print(f"Loading cache: {cache_file.name}")
-        data = np.load(cache_file)
-        return data['ns_arr'], data['nd_arr'], data['ne_arr'], data['rho_arr']
 
     # Generate all valid configurations
     configs = []
@@ -529,48 +525,70 @@ def compute_simplex_heatmap(n=N_NODES, ensemble_size=ENSEMBLE_SIZE, seed=42,
                 configs.append((ns_val, nd_val, ne_val))
 
     n_configs = len(configs)
-    print(f"Total configurations: {n_configs}")
-
     ns_arr = np.array([c[0] for c in configs])
     nd_arr = np.array([c[1] for c in configs])
     ne_arr = np.array([c[2] for c in configs])
     rho_arr = np.full(n_configs, np.nan)
 
-    # Prepare worker args with unique seeds
+    # Load partial cache if exists (for resume)
+    n_already = 0
+    if cache_file.exists():
+        data = np.load(cache_file)
+        cached_rho = data['rho_arr']
+        n_already = int(np.sum(~np.isnan(cached_rho)))
+        if n_already >= n_configs:
+            print(f"Loading complete cache: {cache_file.name}")
+            return data['ns_arr'], data['nd_arr'], data['ne_arr'], cached_rho
+        # Resume from partial cache
+        rho_arr[:len(cached_rho)] = cached_rho
+        print(f"Resuming from partial cache: {n_already}/{n_configs} done")
+
+    # Prepare worker args with unique seeds (deterministic)
     base_rng = np.random.default_rng(seed)
     worker_args = []
     for idx, (ns_val, nd_val, ne_val) in enumerate(configs):
         worker_seed = base_rng.integers(0, 2**32)
         worker_args.append((ns_val, nd_val, n, ensemble_size, worker_seed))
 
+    # Find indices that still need computing
+    todo_indices = [i for i in range(n_configs) if np.isnan(rho_arr[i])]
+    n_todo = len(todo_indices)
+    if n_todo == 0:
+        return ns_arr, nd_arr, ne_arr, rho_arr
+
+    print(f"Total: {n_configs} configs, remaining: {n_todo}")
+
     if n_workers is None:
         n_workers = max(1, cpu_count() - 1)
 
     if n_workers > 1:
         print(f"Using {n_workers} parallel workers")
-        # Process in chunks to show progress and save intermediate results
         chunk_size = 50
-        for start in range(0, n_configs, chunk_size):
-            end = min(start + chunk_size, n_configs)
-            chunk_args = worker_args[start:end]
+        pbar = tqdm(total=n_todo, desc="Simplex heatmap", unit="cfg",
+                    dynamic_ncols=True)
+        for start in range(0, n_todo, chunk_size):
+            end = min(start + chunk_size, n_todo)
+            chunk_indices = todo_indices[start:end]
+            chunk_args = [worker_args[i] for i in chunk_indices]
             with Pool(n_workers) as pool:
                 results = pool.map(_compute_one_config, chunk_args)
-            rho_arr[start:end] = results
-            print(f"  Progress: {end}/{n_configs} "
-                  f"({100*end/n_configs:.1f}%)")
+            for j, idx in enumerate(chunk_indices):
+                rho_arr[idx] = results[j]
+            pbar.update(end - start)
 
             # Intermediate save
             np.savez_compressed(cache_file, ns_arr=ns_arr, nd_arr=nd_arr,
                                 ne_arr=ne_arr, rho_arr=rho_arr)
+        pbar.close()
     else:
-        for idx in range(n_configs):
-            if idx % 50 == 0:
-                print(f"  Config {idx+1}/{n_configs}: "
-                      f"ns={ns_arr[idx]}, nd={nd_arr[idx]}, ne={ne_arr[idx]}")
+        pbar = tqdm(todo_indices, desc="Simplex heatmap", unit="cfg",
+                    dynamic_ncols=True)
+        for count, idx in enumerate(pbar):
+            pbar.set_postfix(ns=int(ns_arr[idx]), nd=int(nd_arr[idx]),
+                             ne=int(ne_arr[idx]))
             rho_arr[idx] = _compute_one_config(worker_args[idx])
 
-            # Periodic save
-            if idx % 100 == 99:
+            if count % 100 == 99:
                 np.savez_compressed(cache_file, ns_arr=ns_arr, nd_arr=nd_arr,
                                     ne_arr=ne_arr, rho_arr=rho_arr)
 
