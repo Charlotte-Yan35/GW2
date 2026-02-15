@@ -608,7 +608,7 @@ def load_failure_points(month, penetration, n_ensemble=50):
     Load sigma trajectories from Figure 4 cache.
     Convert final sigma points to simplex coordinates.
     """
-    cache_file = CACHE_DIR / f"sigmas_m{month}_p{penetration}_n{n_ensemble}.npz"
+    cache_file = CACHE_DIR / f"fig4_sigmas_m{month}_p{penetration}_n{n_ensemble}.npz"
     if not cache_file.exists():
         print(f"Warning: cache file not found: {cache_file}")
         return np.array([]), np.array([]), np.array([])
