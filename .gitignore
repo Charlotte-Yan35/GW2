@@ -1,7 +1,20 @@
 data/
 .venv/
 .claude/
-Reference/
+docs/
 .DS_Store
 *.pkl
 *.pdf
+reference_code/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# OS 文件（补充）
+Thumbs.db
+*.swp
+
+# IDE
+.vscode/
+.idea/

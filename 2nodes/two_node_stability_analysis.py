@@ -3,6 +3,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 from scipy.optimize import fsolve
+from pathlib import Path
+
+OUT_DIR = Path(__file__).parent / "output"
+OUT_DIR.mkdir(exist_ok=True)
 
 # ============================================================
 # 1. 系统定义
@@ -547,19 +551,19 @@ if __name__ == "__main__":
     print("-" * 40)
 
     # 1. 分岔图
-    plot_bifurcation_diagram(kappa, gamma, save_path='bifurcation_diagram.png')
+    plot_bifurcation_diagram(kappa, gamma, save_path=OUT_DIR / 'bifurcation_diagram.png')
 
     # 2. 相图
-    plot_phase_portrait(P, kappa, gamma, save_path='phase_portrait.png')
+    plot_phase_portrait(P, kappa, gamma, save_path=OUT_DIR / 'phase_portrait.png')
 
     # 3. 时间序列
-    plot_time_series(P, kappa, gamma, save_path='time_series.png')
+    plot_time_series(P, kappa, gamma, save_path=OUT_DIR / 'time_series.png')
 
     # 4. 随机事件模拟
     print("\n" + "-" * 40)
     print("随机事件模拟")
     print("-" * 40)
-    simulate_with_random_events(P, kappa, gamma, save_path='random_events.png')
+    simulate_with_random_events(P, kappa, gamma, save_path=OUT_DIR / 'random_events.png')
 
     # 5. 级联故障模拟
     print("\n" + "-" * 40)
@@ -568,18 +572,18 @@ if __name__ == "__main__":
     # 测试接近临界的情况
     simulate_cascading_failure(P_initial=0.5, P_after_failure=0.95,
                                kappa=kappa, gamma=gamma,
-                               save_path='cascading_failure_stable.png')
+                               save_path=OUT_DIR / 'cascading_failure_stable.png')
 
     # 测试超过临界的情况（系统失稳）
     simulate_cascading_failure(P_initial=0.5, P_after_failure=1.2,
                                kappa=kappa, gamma=gamma,
-                               save_path='cascading_failure_unstable.png')
+                               save_path=OUT_DIR / 'cascading_failure_unstable.png')
 
     # 6. 参数扫描
     print("\n" + "-" * 40)
     print("参数扫描")
     print("-" * 40)
-    parameter_sweep(save_path='parameter_sweep.png')
+    parameter_sweep(save_path=OUT_DIR / 'parameter_sweep.png')
 
     print("\n" + "=" * 60)
     print("分析完成!")
