@@ -11,9 +11,6 @@ reference_code/
 __pycache__/
 *.py[cod]
 
-# 计算缓存
-**/cache/*.npz
-
 # OS 文件（补充）
 Thumbs.db
 *.swp
