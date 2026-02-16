@@ -737,7 +737,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    import multiprocessing as mp
-    mp.freeze_support()  # 对于打包的程序很重要
+    # 冻结支持，防止无限递归创建进程
+    mp.freeze_support()
     
+    # 设置启动方法（可选，但推荐）
+    try:
+        mp.set_start_method('spawn')
+    except RuntimeError:
+        pass  # 已经设置过了
+
     main()
