@@ -26,7 +26,8 @@ MONTH_TO_SEASON = {3: 'Spring', 4: 'Spring', 5: 'Spring',
                    12: 'Winter', 1: 'Winter', 2: 'Winter'}
 
 # ── 数据读取与预处理 ──────────────────────────────────
-df = pd.read_pickle(DATA_DIR / 'hourly_data.pkl')
+CSV_PATH = Path(__file__).resolve().parent.parent.parent / 'data' / 'PV Data' / '2014-11-28 Cleansed and Processed' / 'EXPORT HourlyData' / 'EXPORT HourlyData - Customer Endpoints.csv'
+df = pd.read_csv(CSV_PATH, parse_dates=['t_date'])
 df['P_GEN_AVG'] = (df['P_GEN_MIN'] + df['P_GEN_MAX']) / 2
 df['hour'] = df['t_h'].astype(int)
 df['month'] = df['d_m'].astype(int)
@@ -95,25 +96,26 @@ fig.tight_layout()
 fig.savefig(OUT_DIR / 'fig4_heatmap.png')
 print("✓ fig4_heatmap.png")
 
-# ── 表5: 24h 各季节产电区间表（P25 ~ P75） ─────────────
+# ── 表5: 24h 各季节产电统计表（Mean, P25, P75） ────────────
 rows = []
 for season in SEASON_ORDER:
-    sub = df[df['season'] == season].groupby('hour')['P_GEN_AVG'].quantile([0.25, 0.75]).unstack()
-    sub.columns = ['P25', 'P75']
+    sub = df[df['season'] == season].groupby('hour')['P_GEN_AVG'].agg(['mean', lambda x: x.quantile(0.25), lambda x: x.quantile(0.75)])
+    sub.columns = ['Mean', 'P25', 'P75']
     sub['season'] = season
     rows.append(sub)
 range_df = pd.concat(rows).reset_index()
-range_df.columns = ['hour', 'P25', 'P75', 'season']
+range_df.columns = ['hour', 'Mean', 'P25', 'P75', 'season']
 
 # 负值截断为0（夜间微小负值无意义）
-range_df['P25'] = range_df['P25'].clip(lower=0).round(3)
-range_df['P75'] = range_df['P75'].clip(lower=0).round(3)
+for col in ['Mean', 'P25', 'P75']:
+    range_df[col] = range_df[col].clip(lower=0).round(3)
 
-# 透视为宽表：每季节两列（P25, P75）
+# 透视为宽表：每季节三列（Mean, P25, P75）
 wide = range_df.pivot(index='hour', columns='season')
 # 按季节顺序重排列
 col_order = []
 for s in SEASON_ORDER:
+    col_order.append(('Mean', s))
     col_order.append(('P25', s))
     col_order.append(('P75', s))
 wide = wide[col_order]
@@ -127,20 +129,21 @@ wide.to_csv(csv_path)
 print(f"✓ generation_range_by_season.csv")
 
 # 打印表格
-print("\n" + "=" * 90)
-print("24h 各季节产电功率区间 (P25 ~ P75, kW)")
-print("=" * 90)
+print("\n" + "=" * 120)
+print("24h 各季节产电功率统计 (Mean / P25 ~ P75, kW)")
+print("=" * 120)
 header = f"{'Hour':>4}"
 for s in SEASON_ORDER:
-    header += f" | {s:^17}"
+    header += f" | {s:^26}"
 print(header)
-print("-" * 90)
+print("-" * 120)
 for h in range(24):
     row = f"{h:4d}"
     for s in SEASON_ORDER:
+        mean = wide.loc[h, f'{s}_Mean']
         p25 = wide.loc[h, f'{s}_P25']
         p75 = wide.loc[h, f'{s}_P75']
-        row += f" | {p25:6.3f} ~ {p75:6.3f}"
+        row += f" | {mean:6.3f} ({p25:.3f}~{p75:.3f})"
     print(row)
 
 print("\n全部图表已保存至:", OUT_DIR)
