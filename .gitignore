@@ -3,7 +3,6 @@ data/
 .claude/
 docs/
 .DS_Store
-*.pkl
 *.pdf
 reference_code/
 
