@@ -10,6 +10,7 @@ from ws_plots import (
     plot_gini_vs_q,
     plot_cascade_size_vs_q,
 )
+from ws_plots_combined import plot_all_combined
 
 
 def main() -> None:
@@ -26,6 +27,9 @@ def main() -> None:
         plot_lorenz_curves(ratio_name)
         plot_gini_vs_q(ratio_name)
         plot_cascade_size_vs_q(ratio_name)
+
+    # ── combined comparison plots ──
+    plot_all_combined()
 
     print("\nAll done.")
 
