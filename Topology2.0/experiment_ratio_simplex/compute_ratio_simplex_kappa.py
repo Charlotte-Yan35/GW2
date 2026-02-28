@@ -146,7 +146,10 @@ def household_mean_degree(G: nx.Graph) -> float:
 
 
 def _ensure_connected(G: nx.Graph, max_retries: int = 50) -> nx.Graph:
-    """If G is disconnected, add edges between components to make it connected."""
+    """If G is disconnected, add edges between components to make it connected.
+
+    Bridges through household nodes (not PCC) to keep PCC degree controlled.
+    """
     if nx.is_connected(G):
         return G
     components = list(nx.connected_components(G))
@@ -162,28 +165,38 @@ def _ensure_connected(G: nx.Graph, max_retries: int = 50) -> nx.Graph:
     for c in components:
         if c is pcc_comp:
             continue
-        # Add edge between a random node in pcc_comp and a random node in c
-        u = min(pcc_comp)
-        v = min(c)
+        # Bridge through household nodes, not PCC
+        hh_in_main = [n for n in pcc_comp if n != PCC_NODE]
+        u = min(hh_in_main) if hh_in_main else min(pcc_comp)
+        hh_in_c = [n for n in c if n != PCC_NODE]
+        v = min(hh_in_c) if hh_in_c else min(c)
         G.add_edge(u, v)
         pcc_comp = pcc_comp | c
     return G
 
 
+def _attach_pcc(G: nx.Graph, seed: int, n_links: int = 4) -> nx.Graph:
+    """Attach PCC node 0 to n_links randomly chosen household nodes.
+
+    Standardised across all topologies for controlled comparison.
+    PCC degree = 4 for all topologies.
+    """
+    rng = np.random.default_rng(seed + 999999)  # offset to avoid seed collision
+    G.add_node(PCC_NODE)
+    hh = sorted(n for n in G.nodes() if n != PCC_NODE)
+    chosen = rng.choice(hh, size=min(n_links, len(hh)), replace=False)
+    for v in chosen:
+        G.add_edge(PCC_NODE, int(v))
+    return _ensure_connected(G)
+
+
 def generate_ws(seed: int, n: int = N, k: int = 4, q: float = 0.1) -> nx.Graph:
-    """Watts-Strogatz on 49 household nodes + PCC connected to 2 random households."""
+    """Watts-Strogatz on 49 household nodes + PCC connected to 4 random households."""
     rng = np.random.default_rng(seed)
-    # Generate WS on 49 nodes (will be relabelled to 1..49)
     G_household = nx.connected_watts_strogatz_graph(n - 1, k, q, seed=int(rng.integers(2**31)))
     mapping = {i: i + 1 for i in range(n - 1)}
     G = nx.relabel_nodes(G_household, mapping)
-    # Add PCC node 0 connected to 2 random household nodes
-    G.add_node(PCC_NODE)
-    hh = list(range(1, n))
-    chosen = rng.choice(hh, size=min(2, len(hh)), replace=False)
-    for v in chosen:
-        G.add_edge(PCC_NODE, v)
-    return G
+    return _attach_pcc(G, seed)
 
 
 def generate_rgg(seed: int, n: int = N, k_target: int = K_TARGET) -> nx.Graph:
@@ -221,20 +234,13 @@ def generate_rgg(seed: int, n: int = N, k_target: int = K_TARGET) -> nx.Graph:
             break
 
     G = best_G
-    # Add PCC node at center, connected to 2 nearest households
-    G.add_node(PCC_NODE)
-    center = np.array([0.5, 0.5])
-    dists_to_center = np.linalg.norm(best_pos - center, axis=1)
-    nearest = np.argsort(dists_to_center)[:2] + 1  # +1 for relabelling
-    for v in nearest:
-        G.add_edge(PCC_NODE, int(v))
-
-    # Store positions for plotting
-    G.graph['pos'] = {0: (0.5, 0.5)}
+    # Store positions for plotting (before adding PCC)
     for i in range(n - 1):
-        G.graph['pos'][i + 1] = tuple(best_pos[i])
+        G.graph.setdefault('pos', {})[i + 1] = tuple(best_pos[i])
 
-    G = _ensure_connected(G)
+    G = _attach_pcc(G, seed)
+    # PCC position: centroid of households
+    G.graph['pos'][PCC_NODE] = (0.5, 0.5)
     return G
 
 
@@ -289,20 +295,21 @@ def generate_sbm(seed: int, n: int = N, k_target: int = K_TARGET,
     G = best_G
     # Store block assignment for each household node (for plotting)
     offset = 1
+    block_node_lists = []
     for b in range(m):
-        for i in range(block_sizes[b]):
-            G.nodes[offset + i]["block"] = b
+        nodes_b = list(range(offset, offset + block_sizes[b]))
+        for i in nodes_b:
+            G.nodes[i]["block"] = b
+        block_node_lists.append(nodes_b)
         offset += block_sizes[b]
 
-    # Add PCC connected to one node in each of the first 2 blocks
+    # SBM-specific PCC attachment: one node per block (4 blocks → 4 edges)
+    rng_pcc = np.random.default_rng(seed + 999999)
     G.add_node(PCC_NODE)
-    offset = 1
-    for b in range(min(2, m)):
-        G.add_edge(PCC_NODE, offset)
-        offset += block_sizes[b]
-
-    G = _ensure_connected(G)
-    return G
+    for nodes_b in block_node_lists:
+        chosen = rng_pcc.choice(nodes_b)
+        G.add_edge(PCC_NODE, int(chosen))
+    return _ensure_connected(G)
 
 
 def generate_cp(seed: int, n: int = N, k_target: int = K_TARGET,
@@ -350,15 +357,16 @@ def generate_cp(seed: int, n: int = N, k_target: int = K_TARGET,
 
     G = best_G
     # Store core node list for plotting
-    G.graph["core_nodes"] = list(range(1, n_core + 1))
+    core_nodes_list = list(range(1, n_core + 1))
+    G.graph["core_nodes"] = core_nodes_list
 
-    # PCC connects to one core and one periphery node
+    # CP-specific PCC attachment: only connect to Core nodes
+    rng_pcc = np.random.default_rng(seed + 999999)
     G.add_node(PCC_NODE)
-    G.add_edge(PCC_NODE, 1)           # first core node
-    G.add_edge(PCC_NODE, n_core + 1)  # first periphery node
-
-    G = _ensure_connected(G)
-    return G
+    chosen = rng_pcc.choice(core_nodes_list, size=min(4, len(core_nodes_list)), replace=False)
+    for v in chosen:
+        G.add_edge(PCC_NODE, int(v))
+    return _ensure_connected(G)
 
 
 # Dispatcher
