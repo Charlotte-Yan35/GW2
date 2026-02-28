@@ -142,7 +142,7 @@ def plot_combined_kappa_c_map() -> None:
             drawn.add(overlap_rn)
         else:
             ax.plot(qs, kcs + 0.05, marker="*", color="#FF2222",
-                    markersize=12, zorder=5, linestyle="none",
+                    markersize=20, zorder=5, linestyle="none",
                     markeredgecolor="#000000", markeredgewidth=1.0)
             drawn.add(rn)
 
@@ -246,7 +246,7 @@ def plot_combined_kappa_c_heatmap() -> None:
         if not np.isnan(q_star):
             star_color = "#FF2222" if rn == "gen_heavy" else "#FFD700"
             ax.plot(q_star, K_ref, marker="*", color=star_color,
-                    markersize=12, zorder=5,
+                    markersize=20, zorder=5,
                     markeredgecolor="k", markeredgewidth=0.8)
             ax.annotate(rf"$q^*={q_star:.2f}$", (q_star, K_ref),
                         textcoords="offset points", xytext=(10, 8),
@@ -256,7 +256,7 @@ def plot_combined_kappa_c_heatmap() -> None:
         ax.set_title(_RATIO_LABELS[rn], fontsize=_FONT)
         ax.set_yticks(K)
 
-    axes[0].set_ylabel("Degree $k$")
+    axes[0].set_ylabel("Mean degree $k$")
 
     # Shared colorbar — dedicated axes to the right of all subplots
     cbar_ax = fig.add_axes([0.90, 0.12, 0.015, 0.76])
