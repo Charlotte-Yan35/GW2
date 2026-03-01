@@ -26,20 +26,19 @@ from multiprocessing import Pool, cpu_count
 
 import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.optimize import fsolve
 
 try:
     from ratio_scan.shared_utils import (
         N, N_HOUSEHOLDS, PCC_NODE, PMAX, I_INERTIA, D_DAMP,
         generate_ws_network, build_incidence_matrix, adjacencymatrix_from_incidence,
-        fswing, fsteadystate, fsteadystate_gauge,
+        fswing, fsteadystate,
         build_ratio_grid, assign_roles,
     )
 except ModuleNotFoundError:
     from shared_utils import (
         N, N_HOUSEHOLDS, PCC_NODE, PMAX, I_INERTIA, D_DAMP,
         generate_ws_network, build_incidence_matrix, adjacencymatrix_from_incidence,
-        fswing, fsteadystate, fsteadystate_gauge,
+        fswing, fsteadystate,
         build_ratio_grid, assign_roles,
     )
 
@@ -74,129 +73,94 @@ def make_seed(*args):
 
 
 # ====================================================================
-# 稳定性判断
+# Swing ODE 积分 + 稳态检查
 # ====================================================================
 
-def is_stable(A, P, kappa, rng_seed):
-    """判断给定 kappa 下是否存在稳定稳态。
+def _integrate_swing(A, P, n, kappa, y0, t_max=200.0):
+    """积分 Swing 方程，返回 (converged, y_final)。
 
-    方法:
-    1. 随机初始条件积分 Swing 方程
-    2. Gauge fixing: theta[PCC_NODE] = 0
-    3. 用 fsolve 精化稳态
-    4. 检查残差
-
-    Returns
-    -------
-    bool
+    Warm-start 友好：接受任意初始条件 y0。
+    Gauge fixing: 收敛后将 theta 减去 theta[PCC_NODE]。
     """
-    n = len(P)
-    rng = np.random.default_rng(rng_seed)
-
-    # 随机初始条件
-    psi0 = rng.random(2 * n) * 0.1
-
     def rhs(t, y, _A=A, _P=P, _n=n, _kappa=kappa):
         return fswing(y, _A, _P, _n, I_INERTIA, D_DAMP, _kappa)
 
-    sol = solve_ivp(rhs, [0, 200.0], psi0, method='RK45',
+    sol = solve_ivp(rhs, [0, t_max], y0, method='RK45',
                     rtol=1e-8, atol=1e-8, max_step=1.0)
     if sol.status != 0:
-        return False
+        return False, y0
 
-    y_final = sol.y[:, -1]
+    y_final = sol.y[:, -1].copy()
     theta_final = y_final[n:]
 
-    # Gauge fixing: 移除 PCC 节点方程，固定 theta[PCC] = 0
-    theta_reduced = np.delete(theta_final, PCC_NODE)
+    # Gauge fixing: theta[PCC_NODE] = 0
+    theta_final -= theta_final[PCC_NODE]
+    y_final[n:] = theta_final
 
-    def resid_fn(th_red):
-        return fsteadystate_gauge(th_red, A, P, kappa, PCC_NODE)
-
-    try:
-        theta_opt, info, ier, _ = fsolve(resid_fn, theta_reduced, full_output=True)
-    except Exception:
-        return False
-
-    if ier != 1:
-        return False
-
-    residual = fsteadystate_gauge(theta_opt, A, P, kappa, PCC_NODE)
-    return np.linalg.norm(residual) < 1e-5
+    resid = fsteadystate(theta_final, A, P, kappa)
+    converged = np.linalg.norm(resid, 2) < 1e-5
+    return converged, y_final
 
 
 # ====================================================================
-# Bracket + Bisection 求 kappa_c
+# Warm-start 递降搜索 kappa_c (与参考代码一致)
 # ====================================================================
 
-def find_kappa_c(A, P, rng_seed):
-    """Bracket + Bisection 求 kappa_c。
+def find_kappa_c(A, P, rng_seed, kappa_start=None, step_init=0.2,
+                 tol=None):
+    """Warm-start 递降搜索 kappa_c。
 
-    kappa_c = 使稳定稳态存在的最小耦合强度 (返回 kappa_hi)。
+    从高 kappa 开始积分求稳态，然后逐步降低 kappa，
+    每次用上一步的稳态解作为初始条件 (warm-start)。
+    失败时步长减半并回退，收敛条件: stepsize < tol。
 
-    1. Bracket: 从 KAPPA_START 开始，确认 stable;
-       然后向下搜索直到找到 unstable 的 kappa_lo
-    2. Bisection: 直到 kappa_hi - kappa_lo < KAPPA_TOL
-    3. 返回 kappa_hi
-
-    Returns
-    -------
-    float  kappa_c 或 NaN
+    返回 kappa_c 或 NaN。
     """
-    kappa_hi = KAPPA_START
+    if kappa_start is None:
+        kappa_start = KAPPA_START
+    if tol is None:
+        tol = KAPPA_TOL
 
-    # 确认起始点稳定
-    if not is_stable(A, P, kappa_hi, rng_seed):
+    n = len(P)
+    rng = np.random.default_rng(rng_seed)
+
+    kappa = kappa_start
+    y0 = rng.random(2 * n)
+    converged, y_last = _integrate_swing(A, P, n, kappa, y0, t_max=200.0)
+
+    if not converged:
         # 尝试更大的 kappa
-        for mult in [2.0, 5.0, 10.0, 20.0]:
-            kappa_hi = KAPPA_START * mult
-            if is_stable(A, P, kappa_hi, rng_seed):
+        for mult in [2.0, 5.0, 10.0]:
+            y0 = rng.random(2 * n)
+            converged, y_last = _integrate_swing(
+                A, P, n, kappa_start * mult, y0, t_max=200.0)
+            if converged:
+                kappa = kappa_start * mult
                 break
         else:
             return np.nan
 
-    # Bracket: 向下搜索 kappa_lo (不稳定)
-    kappa_lo = kappa_hi
-    step = kappa_hi * 0.25
-    while step > 1e-6:
-        kappa_test = kappa_lo - step
-        if kappa_test <= 0:
-            kappa_lo = 0.0
-            break
-        if is_stable(A, P, kappa_test, rng_seed):
-            kappa_lo = kappa_test
-            kappa_hi = kappa_test  # 降低上界
+    stepsize = step_init
+    kappa_old = kappa
+
+    for _ in range(500):
+        converged, y_sol = _integrate_swing(
+            A, P, n, kappa, y_last, t_max=100.0)
+
+        if converged:
+            y_last = y_sol
+            if stepsize < tol:
+                return kappa
+            kappa_old = kappa
+            kappa -= stepsize
         else:
-            kappa_lo = kappa_test
-            break
-        step *= 0.5
+            stepsize /= 2.0
+            kappa = kappa_old - stepsize
 
-    if kappa_lo <= 0:
-        kappa_lo = 0.0
+        if kappa < 0 or stepsize < 1e-6:
+            return kappa_old
 
-    # 确认 bracket: kappa_lo 不稳定, kappa_hi 稳定
-    if is_stable(A, P, kappa_lo, rng_seed):
-        # 全部稳定，kappa_c 非常小
-        # 进一步向下搜索
-        while kappa_lo > KAPPA_TOL:
-            kappa_lo /= 2.0
-            if not is_stable(A, P, kappa_lo, rng_seed):
-                break
-        else:
-            return KAPPA_TOL  # 几乎 0 就稳定
-
-    if not is_stable(A, P, kappa_hi, rng_seed):
-        return np.nan
-
-    # Bisection
-    while kappa_hi - kappa_lo > KAPPA_TOL:
-        kappa_mid = (kappa_lo + kappa_hi) / 2.0
-        if is_stable(A, P, kappa_mid, rng_seed):
-            kappa_hi = kappa_mid
-        else:
-            kappa_lo = kappa_mid
-
-    return kappa_hi
+    return kappa_old
 
 
 # ====================================================================
