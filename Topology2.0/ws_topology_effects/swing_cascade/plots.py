@@ -10,14 +10,23 @@ ws_cascade_plots.py — 级联 Bisection 相对负载 ρ 绘图
   4. 三 ratio 叠加折线图
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 
-from ws_config import (
-    K_list, q_list, RATIO_CONFIGS, OUTPUT_DIR, CACHE_DIR,
-)
+from ws_config import K_list, q_list, RATIO_CONFIGS
+
+# ── 本模块的 cache / output 目录 ──
+_MODULE_DIR = Path(__file__).resolve().parent
+CACHE_DIR = _MODULE_DIR / "cache"
+OUTPUT_DIR = _MODULE_DIR / "output"
+CACHE_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 # ── 统一样式（同 ws_plots.py）──────────────────────────────────────
 _FONT = 11
@@ -382,3 +391,172 @@ def plot_all_bisection():
         plot_bisection_combined_lines()
     except FileNotFoundError:
         print("  [skip] Missing cache for combined lines")
+
+
+# ====================================================================
+# 5. 级联持续时间 duration vs alpha 折线图
+# ====================================================================
+
+_POINT_COLORS = ["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02"]
+_POINT_MARKERS = ["o", "s", "D", "^", "v", "P"]
+
+
+def _load_duration_cache(ratio_name):
+    path = CACHE_DIR / f"cascade_duration_{ratio_name}.pkl"
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def plot_cascade_duration(ratio_name):
+    """Duration vs alpha 折线图，每条线对应一个兴趣点。"""
+    data = _load_duration_cache(ratio_name)
+    alpha_list = data["alpha_list"]
+    duration_mean = data["duration_mean"]
+    duration_std = data["duration_std"]
+    points = data["interest_points"]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    for pi, pt in enumerate(points):
+        label = f"{pt['label']} (K={pt['K']}, q={pt['q']:.2f})"
+        c = _POINT_COLORS[pi % len(_POINT_COLORS)]
+        m = _POINT_MARKERS[pi % len(_POINT_MARKERS)]
+
+        mean = duration_mean[pi]
+        std = duration_std[pi]
+        valid = ~np.isnan(mean)
+        if not valid.any():
+            continue
+
+        a = np.array(alpha_list)
+        ax.plot(a[valid], mean[valid], f"{m}-", color=c, markersize=6,
+                label=label)
+        ax.fill_between(a[valid], (mean - std)[valid], (mean + std)[valid],
+                        color=c, alpha=0.15)
+
+    ax.set_xlabel(r"Overload tolerance $\alpha$")
+    ax.set_ylabel("Cascade duration (simulation time)")
+    ax.set_title(f"Cascade duration vs $\\alpha$ — {ratio_name}")
+    ax.legend(fontsize=8, loc="best")
+    ax.set_ylim(bottom=0)
+
+    _save_fig(fig, f"cascade_duration_{ratio_name}")
+
+
+def plot_cascade_duration_survival(ratio_name):
+    """Surviving fraction vs alpha，每条线对应一个兴趣点。"""
+    data = _load_duration_cache(ratio_name)
+    alpha_list = data["alpha_list"]
+    surviving_mean = data["surviving_mean"]
+    surviving_std = data["surviving_std"]
+    points = data["interest_points"]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    for pi, pt in enumerate(points):
+        label = f"{pt['label']} (K={pt['K']}, q={pt['q']:.2f})"
+        c = _POINT_COLORS[pi % len(_POINT_COLORS)]
+        m = _POINT_MARKERS[pi % len(_POINT_MARKERS)]
+
+        mean = surviving_mean[pi]
+        std = surviving_std[pi]
+        valid = ~np.isnan(mean)
+        if not valid.any():
+            continue
+
+        a = np.array(alpha_list)
+        ax.plot(a[valid], mean[valid], f"{m}-", color=c, markersize=6,
+                label=label)
+        ax.fill_between(a[valid], (mean - std)[valid], (mean + std)[valid],
+                        color=c, alpha=0.15)
+
+    ax.set_xlabel(r"Overload tolerance $\alpha$")
+    ax.set_ylabel("Surviving edge fraction")
+    ax.set_title(f"Surviving fraction vs $\\alpha$ — {ratio_name}")
+    ax.legend(fontsize=8, loc="best")
+    ax.set_ylim(0, 1.05)
+
+    _save_fig(fig, f"cascade_duration_survival_{ratio_name}")
+
+
+def plot_cascade_duration_combined():
+    """三 ratio 对比: 2×3 子图，上排 duration，下排 surviving。"""
+    ratio_names = list(RATIO_CONFIGS.keys())
+
+    all_data = {}
+    for rn in ratio_names:
+        try:
+            all_data[rn] = _load_duration_cache(rn)
+        except FileNotFoundError:
+            print(f"  [skip] No duration cache for {rn}")
+            return
+
+    fig, axes = plt.subplots(2, 3, figsize=(16, 9), sharex=True)
+
+    for col, rn in enumerate(ratio_names):
+        data = all_data[rn]
+        alpha_list = data["alpha_list"]
+        points = data["interest_points"]
+        a = np.array(alpha_list)
+
+        # 上排: duration
+        ax_dur = axes[0, col]
+        for pi, pt in enumerate(points):
+            mean = data["duration_mean"][pi]
+            std = data["duration_std"][pi]
+            valid = ~np.isnan(mean)
+            if not valid.any():
+                continue
+            c = _POINT_COLORS[pi % len(_POINT_COLORS)]
+            m = _POINT_MARKERS[pi % len(_POINT_MARKERS)]
+            label = f"{pt['label']}" if col == 0 else None
+            ax_dur.plot(a[valid], mean[valid], f"{m}-", color=c,
+                        markersize=5, label=label)
+            ax_dur.fill_between(a[valid], (mean - std)[valid],
+                                (mean + std)[valid], color=c, alpha=0.1)
+
+        ax_dur.set_title(_RATIO_LABELS.get(rn, rn))
+        ax_dur.set_ylim(bottom=0)
+        if col == 0:
+            ax_dur.set_ylabel("Cascade duration")
+            ax_dur.legend(fontsize=7, loc="best")
+
+        # 下排: surviving
+        ax_srv = axes[1, col]
+        for pi, pt in enumerate(points):
+            mean = data["surviving_mean"][pi]
+            std = data["surviving_std"][pi]
+            valid = ~np.isnan(mean)
+            if not valid.any():
+                continue
+            c = _POINT_COLORS[pi % len(_POINT_COLORS)]
+            m = _POINT_MARKERS[pi % len(_POINT_MARKERS)]
+            ax_srv.plot(a[valid], mean[valid], f"{m}-", color=c, markersize=5)
+            ax_srv.fill_between(a[valid], (mean - std)[valid],
+                                (mean + std)[valid], color=c, alpha=0.1)
+
+        ax_srv.set_xlabel(r"$\alpha$")
+        ax_srv.set_ylim(0, 1.05)
+        if col == 0:
+            ax_srv.set_ylabel("Surviving fraction")
+
+    fig.tight_layout()
+    _save_fig(fig, "combined_cascade_duration")
+
+
+def plot_all_duration():
+    """生成所有级联持续时间图表。"""
+    print("\n── Cascade duration plots ──")
+    ratio_names = list(RATIO_CONFIGS.keys())
+
+    for rn in ratio_names:
+        try:
+            plot_cascade_duration(rn)
+            plot_cascade_duration_survival(rn)
+        except FileNotFoundError:
+            print(f"  [skip] No duration cache for {rn}")
+
+    try:
+        plot_cascade_duration_combined()
+    except FileNotFoundError:
+        print("  [skip] Missing duration cache for combined plot")

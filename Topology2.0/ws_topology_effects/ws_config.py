@@ -46,9 +46,18 @@ RATIO_CONFIGS = {
     },
 }
 
+# ── Cascade duration exploration ─────────────────────────────────
+# 6 个兴趣点 (K, q)，用于持续时间分析
+INTEREST_POINTS = [
+    {"label": "P1", "K": 4,  "q": 0.00, "note": "G=C MIN ρ̄"},
+    {"label": "P2", "K": 6,  "q": 0.00, "note": "G>C,G<C MAX ρ̄"},
+    {"label": "P3", "K": 6,  "q": 0.35, "note": "G=C MAX ρ̄"},
+    {"label": "P4", "K": 4,  "q": 0.90, "note": "G>C MIN ρ̄"},
+    {"label": "P5", "K": 8,  "q": 0.50, "note": "中间参考点"},
+    {"label": "P6", "K": 4,  "q": 0.10, "note": "G<C MIN ρ̄"},
+]
+ALPHA_DURATION = [0.5, 1.0, 1.5, 2.0, 2.5]  # alpha 扫描范围
+DURATION_REALIZATIONS = 20                     # 每个 (点, alpha) 的 ensemble 数
+
 # ── Paths ─────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
-CACHE_DIR = BASE_DIR / "cache"
-OUTPUT_DIR = BASE_DIR / "output"
-CACHE_DIR.mkdir(exist_ok=True)
-OUTPUT_DIR.mkdir(exist_ok=True)
