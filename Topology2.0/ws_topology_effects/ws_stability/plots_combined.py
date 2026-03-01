@@ -6,6 +6,10 @@ Generates true overlay comparisons across ratio configurations:
   2. combined_kappa_c_heatmap.png — 1×3 absolute κ_c heatmaps
 """
 
+import sys
+from pathlib import Path as _Path
+sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,9 +18,14 @@ from matplotlib.markers import MarkerStyle
 from matplotlib.lines import Line2D
 from scipy.interpolate import RegularGridInterpolator
 
-from ws_config import (
-    K_list, q_list, K_ref, RATIO_CONFIGS, OUTPUT_DIR, CACHE_DIR,
-)
+from ws_config import K_list, q_list, K_ref, RATIO_CONFIGS
+
+# ── 本模块的 cache / output 目录 ──
+_MODULE_DIR = _Path(__file__).resolve().parent
+CACHE_DIR = _MODULE_DIR / "cache"
+OUTPUT_DIR = _MODULE_DIR / "output"
+CACHE_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 # ── Style ────────────────────────────────────────────────────────
 _FONT = 11

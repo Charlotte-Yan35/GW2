@@ -5,6 +5,10 @@ All functions read from cache/{ratio}.pkl and write to output/.
 No network generation, simulation, or numerical computation here.
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
@@ -12,9 +16,14 @@ from matplotlib.ticker import MaxNLocator
 from matplotlib.colors import Normalize
 from scipy.interpolate import RegularGridInterpolator
 
-from ws_config import (
-    K_list, q_list, K_ref, OUTPUT_DIR, CACHE_DIR,
-)
+from ws_config import K_list, q_list, K_ref
+
+# ── 本模块的 cache / output 目录 ──
+_MODULE_DIR = Path(__file__).resolve().parent
+CACHE_DIR = _MODULE_DIR / "cache"
+OUTPUT_DIR = _MODULE_DIR / "output"
+CACHE_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 # ── Unified style ────────────────────────────────────────────────
 _FONT = 11

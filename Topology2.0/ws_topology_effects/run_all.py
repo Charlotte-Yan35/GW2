@@ -3,16 +3,16 @@ run_all.py — Entry point: compute & plot for all ratio configurations.
 """
 
 from ws_config import RATIO_CONFIGS
-from ws_compute import compute_all_for_ratio
-from ws_plots import (
+from ws_stability.compute import compute_all_for_ratio
+from ws_stability.plots import (
     plot_kappa_c_map,
     plot_lorenz_curves,
     plot_gini_vs_q,
     plot_cascade_size_vs_q,
 )
-from ws_plots_combined import plot_all_combined
-from ws_cascade_compute import compute_and_cache_bisection
-from ws_cascade_plots import plot_all_bisection
+from ws_stability.plots_combined import plot_all_combined
+from swing_cascade.compute import compute_and_cache_bisection
+from swing_cascade.plots import plot_all_bisection
 
 
 def main() -> None:

@@ -10,6 +10,10 @@ Implements:
   6. Per-ratio .pkl caching
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import pickle
 import numpy as np
 import networkx as nx
@@ -20,8 +24,13 @@ from ws_config import (
     N, PCC_NODE, HOUSEHOLD_NODES,
     K_list, q_list, gamma, kappa_grid, realizations,
     K_ref, alpha,
-    RATIO_CONFIGS, CACHE_DIR,
+    RATIO_CONFIGS,
 )
+
+# ── 本模块的 cache / output 目录 ──
+_MODULE_DIR = Path(__file__).resolve().parent
+CACHE_DIR = _MODULE_DIR / "cache"
+CACHE_DIR.mkdir(exist_ok=True)
 
 
 # ====================================================================

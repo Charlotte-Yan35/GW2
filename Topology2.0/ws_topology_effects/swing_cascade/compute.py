@@ -12,6 +12,10 @@ swingfracture 实现。
   5. 在 K×q 全网格上扫描
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import pickle
 import numpy as np
 from scipy.integrate import solve_ivp, RK45
@@ -20,10 +24,15 @@ from tqdm import tqdm
 from ws_config import (
     N, PCC_NODE, HOUSEHOLD_NODES,
     K_list, q_list, realizations,
-    RATIO_CONFIGS, CACHE_DIR,
+    RATIO_CONFIGS,
     KAPPA_CASCADE, I_INERTIA, D_DAMP, SYNCTOL, BISECT_TOL,
 )
-from ws_compute import generate_ws_network, build_power_vector
+
+# ── 本模块的 cache / output 目录 ──
+_MODULE_DIR = Path(__file__).resolve().parent
+CACHE_DIR = _MODULE_DIR / "cache"
+CACHE_DIR.mkdir(exist_ok=True)
+from ws_stability.compute import generate_ws_network, build_power_vector
 
 
 # ====================================================================
@@ -463,14 +472,273 @@ def compute_and_cache_bisection(ratio_name):
 
 
 # ====================================================================
+# 8. 带时间记录的级联 swingfracture（级联持续时间探索）
+# ====================================================================
+
+def swingfracture_timed(E_full, active_edges, psi, nodeset, P,
+                        synctol, alpha, kappa, maxflow, t_offset=0.0):
+    """带时间记录的递归级联算法。
+
+    与 swingfracture 逻辑相同，但额外记录：
+    - 每轮级联的实际仿真时间
+    - 每轮移除的边数
+    - 最终存活边数
+
+    Returns
+    -------
+    dict with keys:
+        "surviving"  : int   存活边数
+        "rounds"     : list of dict  每轮信息 {"t": 时间, "removed": 移除边数}
+        "total_time" : float 总仿真时间
+    """
+    tol = 1e-5
+    nc = len(nodeset)
+
+    P1 = np.array([P[v] for v in nodeset])
+    sourcecounter = int(np.sum(P1 > tol))
+    sinkcounter = int(np.sum(P1 < -tol))
+
+    edgeset = sorted({j for v in nodeset
+                      for j in active_edges
+                      if abs(E_full[v, j]) > 0.5})
+    ec = len(edgeset)
+
+    empty_result = {"surviving": 0, "rounds": [], "total_time": 0.0}
+
+    if sourcecounter == 0 or sinkcounter == 0:
+        return empty_result
+    if ec == 0:
+        return empty_result
+
+    # 齐次再平衡
+    delta = np.sum(P1) / 2.0
+    for i in range(nc):
+        if P1[i] < -tol:
+            P1[i] -= delta / sinkcounter
+        if P1[i] > tol:
+            P1[i] -= delta / sourcecounter
+
+    # 构建子网络关联矩阵
+    E1 = np.zeros((nc, ec))
+    for i, v in enumerate(nodeset):
+        for j_local, j_global in enumerate(edgeset):
+            E1[i, j_local] = E_full[v, j_global]
+
+    A1 = adjacencymatrix_from_incidence(E1)
+
+    def rhs(t, y):
+        return fswing(y, A1, P1, nc, I_INERTIA, D_DAMP, kappa)
+
+    solver = RK45(rhs, 0.0, psi, 500.0, rtol=1e-8, atol=1e-8)
+    reason = 'timeout'
+    while solver.status == 'running':
+        solver.step()
+        y = solver.y
+        if np.linalg.norm(y[:nc], 2) > synctol:
+            reason = 'desync'
+            break
+        flow_cur = edgepower(y[nc:], E1, kappa) / maxflow
+        if np.any(np.abs(flow_cur) > alpha):
+            reason = 'overload'
+            break
+        if np.linalg.norm(fsteadystate(y[nc:], A1, P1, kappa), 2) < 1e-6:
+            reason = 'converge'
+            break
+
+    sim_time = solver.t
+    psi_f = solver.y
+    omega_f, theta_f = psi_f[:nc], psi_f[nc:]
+
+    if reason == 'desync' or np.linalg.norm(omega_f, 2) > synctol:
+        return {"surviving": 0, "rounds": [{"t": sim_time, "removed": ec}],
+                "total_time": t_offset + sim_time}
+
+    flow_f = edgepower(theta_f, E1, kappa) / maxflow
+    if not np.any(np.abs(flow_f) > alpha):
+        return {"surviving": ec, "rounds": [], "total_time": t_offset + sim_time}
+
+    # 移除过载边
+    removed_this_round = 0
+    survivor_local = []
+    for j_local in range(ec):
+        if abs(flow_f[j_local]) > alpha:
+            active_edges.discard(edgeset[j_local])
+            removed_this_round += 1
+        else:
+            survivor_local.append(j_local)
+
+    rounds = [{"t": sim_time, "removed": removed_this_round}]
+
+    if not survivor_local:
+        return {"surviving": 0, "rounds": rounds,
+                "total_time": t_offset + sim_time}
+
+    E2 = E1[:, survivor_local]
+    Adj2 = adjacencymatrix_from_incidence(E2)
+    _, comp_table = connected_components(Adj2)
+
+    total_surviving = 0
+    for comp in comp_table:
+        psi_comp = np.concatenate([omega_f[comp], theta_f[comp]])
+        sub_result = swingfracture_timed(
+            E_full, active_edges, psi_comp,
+            [nodeset[c] for c in comp],
+            P, synctol, alpha, kappa, maxflow,
+            t_offset=t_offset + sim_time
+        )
+        total_surviving += sub_result["surviving"]
+        rounds.extend(sub_result["rounds"])
+
+    total_time = max((r["t"] for r in rounds), default=sim_time) + t_offset
+    return {"surviving": total_surviving, "rounds": rounds,
+            "total_time": total_time}
+
+
+def _cascade_with_alpha_timed(member, alpha):
+    """执行一次带时间记录的 swing-based 级联。
+
+    Returns
+    -------
+    dict with keys:
+        "surviving_frac" : float  存活边比例
+        "total_time"     : float  级联总持续时间
+        "n_rounds"       : int    级联轮数
+    """
+    E = member['E']
+    P = member['P']
+    omega_ss = member['omega_ss']
+    theta_ss = member['theta_ss']
+    flowmax = member['flowmax']
+    d = member['d']
+    m = member['m']
+    n = member['n']
+
+    if m == 0:
+        return {"surviving_frac": 0.0, "total_time": 0.0, "n_rounds": 0}
+
+    active_edges = set(range(m))
+    active_edges.discard(d)
+
+    E_remain = E[:, sorted(active_edges)]
+    A_remain = adjacencymatrix_from_incidence(E_remain)
+    _, comp_table = connected_components(A_remain)
+
+    total_surviving = 0
+    all_rounds = []
+    for comp in comp_table:
+        nodeset = comp
+        psi_comp = np.concatenate([omega_ss[comp], theta_ss[comp]])
+        result = swingfracture_timed(
+            E, active_edges, psi_comp, nodeset,
+            P, SYNCTOL, alpha, KAPPA_CASCADE, flowmax
+        )
+        total_surviving += result["surviving"]
+        all_rounds.extend(result["rounds"])
+
+    total_time = max((r["t"] for r in all_rounds), default=0.0)
+    return {
+        "surviving_frac": total_surviving / m,
+        "total_time": total_time,
+        "n_rounds": len(all_rounds),
+    }
+
+
+def compute_cascade_duration(ratio_name):
+    """对 INTEREST_POINTS × ALPHA_DURATION 计算级联持续时间。
+
+    Returns
+    -------
+    dict with keys:
+        "interest_points" : list of dict
+        "alpha_list"      : list of float
+        "duration_mean"   : ndarray (n_points, n_alpha)
+        "duration_std"    : ndarray (n_points, n_alpha)
+        "surviving_mean"  : ndarray (n_points, n_alpha)
+        "surviving_std"   : ndarray (n_points, n_alpha)
+        "ratio_name"      : str
+    """
+    from ws_config import INTEREST_POINTS, ALPHA_DURATION, DURATION_REALIZATIONS
+
+    n_pts = len(INTEREST_POINTS)
+    n_alpha = len(ALPHA_DURATION)
+
+    duration_mean = np.full((n_pts, n_alpha), np.nan)
+    duration_std = np.full((n_pts, n_alpha), np.nan)
+    surviving_mean = np.full((n_pts, n_alpha), np.nan)
+    surviving_std = np.full((n_pts, n_alpha), np.nan)
+
+    total = n_pts * n_alpha
+    pbar = tqdm(total=total, desc=f"Cascade duration [{ratio_name}]", unit="pt")
+
+    for pi, pt in enumerate(INTEREST_POINTS):
+        K = pt["K"]
+        q = pt["q"]
+        label = pt["label"]
+
+        base_seed = hash((ratio_name, "duration", K, int(q * 1000))) % (2**31)
+        ensemble = _prepare_ensemble(ratio_name, K, q,
+                                     DURATION_REALIZATIONS, base_seed)
+
+        for ai, alp in enumerate(ALPHA_DURATION):
+            durations = []
+            survivals = []
+
+            for member in ensemble:
+                result = _cascade_with_alpha_timed(member, alp)
+                durations.append(result["total_time"])
+                survivals.append(result["surviving_frac"])
+
+            if durations:
+                duration_mean[pi, ai] = np.mean(durations)
+                duration_std[pi, ai] = np.std(durations)
+                surviving_mean[pi, ai] = np.mean(survivals)
+                surviving_std[pi, ai] = np.std(survivals)
+
+            pbar.set_postfix(pt=label, alpha=f"{alp:.1f}",
+                             dur=f"{duration_mean[pi, ai]:.1f}")
+            pbar.update(1)
+
+    pbar.close()
+
+    return {
+        "interest_points": INTEREST_POINTS,
+        "alpha_list": ALPHA_DURATION,
+        "duration_mean": duration_mean,
+        "duration_std": duration_std,
+        "surviving_mean": surviving_mean,
+        "surviving_std": surviving_std,
+        "ratio_name": ratio_name,
+    }
+
+
+def _duration_cache_path(ratio_name):
+    return CACHE_DIR / f"cascade_duration_{ratio_name}.pkl"
+
+
+def compute_and_cache_duration(ratio_name):
+    """带缓存的级联持续时间计算。"""
+    path = _duration_cache_path(ratio_name)
+    if path.exists():
+        print(f"  [cache hit] {path}")
+        return
+
+    print(f"\n--- Computing cascade duration for '{ratio_name}' ---")
+    result = compute_cascade_duration(ratio_name)
+
+    with open(path, "wb") as f:
+        pickle.dump(result, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"  Cache saved → {path}")
+
+
+# ====================================================================
 # 独立运行测试
 # ====================================================================
 
 if __name__ == "__main__":
-    import sys
+    import sys as _sys
 
-    if len(sys.argv) > 1:
-        ratio = sys.argv[1]
+    if len(_sys.argv) > 1:
+        ratio = _sys.argv[1]
     else:
         ratio = "balanced"
 

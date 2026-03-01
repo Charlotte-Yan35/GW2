@@ -11,7 +11,10 @@ GW2/
 ├── reproduction/           # 论文图表复现（Figure 1–6, S2）
 ├── 2nodes/                 # 两节点模型：分岔图、相图、稳定性分析
 ├── household/              # 家庭用电 / 光伏发电 / 单节点微电网
-├── Topology2.0/            # 拓扑与韧性扩展实验（WS 拓扑效应、级联恢复）
+├── Topology2.0/            # 拓扑与韧性扩展实验
+│   ├── ws_topology_effects/      # WS 拓扑效应 (κ_c、Gini、级联二分)
+│   ├── experiment_ratio_simplex/ # 三元单纯形 × 4 种拓扑族
+│   └── cascade_resilience/       # 级联恢复时间与服务水平分析
 ├── Q1Topology/             # Q1 作业：Watts-Strogatz 网络分析
 ├── data/                   # 原始数据（LCL / PV / xlsx 等）
 ├── docs/                   # 文档与复现说明
@@ -136,10 +139,78 @@ python household/node/household_microgrid.py
 
 ### 4) 拓扑与韧性扩展实验（`Topology2.0/`）
 
-扩展原论文的实验，包括：
-- `ws_topology_effects/` — Watts-Strogatz 拓扑指标（路径长度、聚类系数、代数连通度）与基尼系数分析
-- `experiment_ratio_simplex/` — 不同节点配比下的 $\kappa_c$ 热力图
-- `cascade_resilience/` — 级联故障恢复时间分析
+扩展原论文的 WS 拓扑实验，涵盖三大子模块。
+
+#### 4a) WS 拓扑效应（`ws_topology_effects/`）
+
+研究 Watts-Strogatz 网络的重连概率 $q$ 与平均度 $K$ 如何影响电网稳定性。
+
+| 脚本 | 说明 |
+|------|------|
+| `ws_config.py` | 全局参数配置（50 节点，K∈{4,6,8,10,12}，q∈[0,1]，3 种发电/负荷配比） |
+| `ws_compute.py` | 核心计算：κ_c 二分搜索、DC 潮流、Lorenz 曲线与 Gini 系数 |
+| `ws_plots.py` | 绘图：κ_c(q) 曲线、κ_c(K,q) 热力图、Lorenz 曲线、Gini 系数 |
+| `ws_cascade_compute.py` | 基于摇摆方程的级联故障二分搜索（α_critical） |
+| `ws_cascade_plots.py` | 级联热力图与线图（相对负载 ρ） |
+| `ws_plots_combined.py` | 多配比对比图（balanced / gen_heavy / load_heavy 叠加） |
+| `run_all.py` | 一键运行全部计算与绘图 |
+| `run_cascade_all.py` | 仅运行级联二分计算 |
+
+三种发电/负荷配比：
+- **balanced**：24 发电 + 25 负荷
+- **gen_heavy**：37 发电 + 12 负荷（75% 发电主导）
+- **load_heavy**：12 发电 + 37 负荷（75% 负荷主导）
+
+```bash
+python Topology2.0/ws_topology_effects/run_all.py
+```
+
+#### 4b) 三元单纯形拓扑扫描（`experiment_ratio_simplex/`）
+
+在 4 种拓扑族上扫描发电 / 负荷 / 被动节点配比空间（三元单纯形），比较不同网络结构对 $\kappa_c$ 的影响。
+
+**4 种拓扑族：**
+- **WS**（Watts-Strogatz）：小世界网络
+- **RGG**（Random Geometric Graph）：欧氏距离随机图
+- **SBM**（Stochastic Block Model）：社区结构网络
+- **CP**（Core-Periphery）：核心-外围网络
+
+| 脚本 | 说明 |
+|------|------|
+| `compute_ratio_simplex_kappa.py` | 多进程并行扫描三元配比空间，缓存至 CSV |
+| `plot_ratio_simplex_kappa.py` | 2×2 三元热力图（4 种拓扑族的 κ_c 分布） |
+| `plot_topology_structures.py` | 2×2 网络结构可视化（WS/RGG/SBM/CP 代表性图） |
+
+```bash
+python Topology2.0/experiment_ratio_simplex/compute_ratio_simplex_kappa.py
+python Topology2.0/experiment_ratio_simplex/plot_ratio_simplex_kappa.py
+python Topology2.0/experiment_ratio_simplex/plot_topology_structures.py
+```
+
+输出：`Topology2.0/experiment_ratio_simplex/figures/`
+
+#### 4c) 级联韧性与恢复分析（`cascade_resilience/`）
+
+研究级联故障后的**恢复时间**与**服务水平**动态，支持随机边故障、修复调度和 PCC 连通性追踪。
+
+| 脚本 | 说明 |
+|------|------|
+| `cascade_utils.py` | 核心引擎：摇摆方程积分、故障检测、修复调度、服务水平 $S_{\text{PCC}}(t)$ 计算 |
+| `experiment_recovery_time_ws.py` | CLI 驱动的 3D 参数扫描（K, q, α），支持 NPZ 缓存 |
+| `plots_recovery_panels.py` | 4×3 出版级面板图（网络结构 / 未恢复比例 / $S_{\min}$ / 时间序列） |
+
+关键指标：
+- $T_{\text{rec}}$：恢复时间（$S_{\text{PCC}}$ 回到阈值以上）
+- $A_{\text{res}}$：服务损失面积（$\int (1 - S_{\text{PCC}}) \, dt$）
+- $S_{\min}$：最低服务水平
+
+```bash
+python Topology2.0/cascade_resilience/experiment_recovery_time_ws.py --K_list 4,6,8 --q_points 21 --alpha_points 21 --R 10
+python Topology2.0/cascade_resilience/plots_recovery_panels.py
+```
+
+输出：`Topology2.0/cascade_resilience/output/`
+缓存：`Topology2.0/cascade_resilience/cache/`（**请勿删除**）
 
 ### 5) Q1 作业（`Q1Topology/`）
 
@@ -155,7 +226,9 @@ python household/node/household_microgrid.py
 | 论文复现 | `reproduction/output/` (Figure 1–6, S2) |
 | 两节点分析 | `2nodes/output/` |
 | 家庭分析 | `household/*/output/` |
-| 拓扑扩展 | `Topology2.0/*/output/` |
+| WS 拓扑效应 | `Topology2.0/ws_topology_effects/output/` |
+| 三元单纯形 | `Topology2.0/experiment_ratio_simplex/figures/` |
+| 级联韧性 | `Topology2.0/cascade_resilience/output/` |
 
 ## 说明
 
