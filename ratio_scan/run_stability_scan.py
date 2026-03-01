@@ -52,7 +52,7 @@ RESULTS_DIR.mkdir(exist_ok=True)
 
 # ── 参数 ──────────────────────────────────────────────────────────
 K_VALUES = [4, 8]
-Q_VALUES = [0.0, 0.15, 1.0]
+Q_VALUES = [0.0, 0.15, 0.5, 1.0]
 RATIO_STEP = 10
 REALIZATIONS = 20
 ROLE_SEEDS = 5
