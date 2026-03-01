@@ -240,7 +240,7 @@ def plot_bisection_combined_heatmap():
     vmin = min(np.nanmin(z) for z in Z_all.values())
     vmax = max(np.nanmax(z) for z in Z_all.values())
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.5), sharey=True,
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.2), sharey=True,
                              gridspec_kw={"right": 0.88})
 
     cf = None
@@ -314,7 +314,7 @@ def plot_bisection_combined_heatmap():
     cb = fig.colorbar(cf, cax=cbar_ax)
     cb.set_label(r"$\overline{\rho}$")
 
-    fig.subplots_adjust(wspace=0.08, top=0.92, bottom=0.15)
+    fig.subplots_adjust(wspace=0.08, top=0.90, bottom=0.18)
     _save_fig(fig, "combined_cascade_bisection_heatmap")
 
 
