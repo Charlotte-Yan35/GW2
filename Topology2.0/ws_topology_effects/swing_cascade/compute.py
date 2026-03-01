@@ -26,6 +26,8 @@ from ws_config import (
     K_list, q_list, realizations,
     RATIO_CONFIGS,
     KAPPA_CASCADE, I_INERTIA, D_DAMP, SYNCTOL, BISECT_TOL,
+    DurationSweepConfig, DURATION_SWEEP_PANELS,
+    S2_ALPHA_MIN, S2_ALPHA_MAX, S2_ALPHA_RES, S2_ENSEMBLE_SIZE, S2_SEED,
 )
 
 # ── 本模块的 cache / output 目录 ──
@@ -728,6 +730,339 @@ def compute_and_cache_duration(ratio_name):
     with open(path, "wb") as f:
         pickle.dump(result, f, protocol=pickle.HIGHEST_PROTOCOL)
     print(f"  Cache saved → {path}")
+
+
+# ====================================================================
+# 9. Figure S2 风格：参数化 ensemble / cascade / 曲线计算
+# ====================================================================
+
+def _fmt_value(x):
+    """数值格式化：整数去小数点，浮点保留1位。"""
+    if abs(x - round(x)) < 1e-10:
+        return str(int(round(x)))
+    return f"{x:.1f}".rstrip("0").rstrip(".")
+
+
+def _s2_cache_path(panel, variable_name, value, ratio_name,
+                   ensemble_size, alpha_res, seed):
+    """S2 风格缓存路径。"""
+    subdir = CACHE_DIR / "figS2"
+    subdir.mkdir(exist_ok=True)
+    v_str = _fmt_value(value).replace(".", "p")
+    return subdir / (
+        f"s2_{panel}_{variable_name}{v_str}_{ratio_name}"
+        f"_e{ensemble_size}_r{alpha_res}_s{seed}.npz"
+    )
+
+
+def _prepare_ensemble_parameterized(ratio_name, K, q, n_realizations, base_seed,
+                                    kappa, d_damp):
+    """参数化版 ensemble 准备：显式传入 kappa 和 d_damp。
+
+    与 _prepare_ensemble 逻辑相同，但 kappa/d_damp 不从全局常量读取。
+    """
+    ensemble = []
+    for r in range(n_realizations):
+        seed = base_seed + r
+        G = generate_ws_network(N, K, q, seed=seed)
+        P = build_power_vector(ratio_name, seed=seed + 1)
+
+        E = build_incidence_matrix(G)
+        m = E.shape[1]
+        n = N
+        A = adjacencymatrix_from_incidence(E)
+
+        rng = np.random.default_rng(seed + 2)
+        psi0 = rng.random(2 * n)
+
+        def rhs(t, y, _A=A, _P=P, _n=n, _kappa=kappa, _d=d_damp):
+            return fswing(y, _A, _P, _n, I_INERTIA, _d, _kappa)
+
+        sol = solve_ivp(rhs, [0, 250.0], psi0, method='RK45',
+                        rtol=1e-8, atol=1e-8, max_step=1.0)
+        if sol.status != 0:
+            continue
+
+        psi_ss = sol.y[:, -1]
+        omega_ss = psi_ss[:n]
+        theta_ss = psi_ss[n:]
+
+        if np.linalg.norm(fsteadystate(theta_ss, A, P, kappa), 2) > 1e-3:
+            continue
+
+        flow = edgepower(theta_ss, E, kappa)
+        flowmax = np.max(np.abs(flow))
+        if flowmax < 1e-12:
+            continue
+
+        d_idx = int(np.argmax(np.abs(flow)))
+
+        ensemble.append({
+            'E': E, 'P': P,
+            'omega_ss': omega_ss, 'theta_ss': theta_ss,
+            'flowmax': flowmax, 'd': d_idx, 'm': m, 'n': n,
+        })
+
+    return ensemble
+
+
+def swingfracture_timed_parameterized(E_full, active_edges, psi, nodeset, P,
+                                       synctol, alpha, kappa, maxflow, d_damp,
+                                       t_offset=0.0):
+    """参数化版带时间记录的递归级联算法（d_damp 作为参数）。
+
+    使用 solve_ivp + 离散时间网格检测事件，与 figureS2.py 的
+    simulate_until_event 方式一致（模拟 Julia DiscreteCallback）。
+    """
+    tol = 1e-5
+    nc = len(nodeset)
+
+    P1 = np.array([P[v] for v in nodeset])
+    sourcecounter = int(np.sum(P1 > tol))
+    sinkcounter = int(np.sum(P1 < -tol))
+
+    edgeset = sorted({j for v in nodeset
+                      for j in active_edges
+                      if abs(E_full[v, j]) > 0.5})
+    ec = len(edgeset)
+
+    empty_result = {"surviving": 0, "rounds": [], "total_time": 0.0}
+
+    if sourcecounter == 0 or sinkcounter == 0:
+        return empty_result
+    if ec == 0:
+        return empty_result
+
+    delta = np.sum(P1) / 2.0
+    for i in range(nc):
+        if P1[i] < -tol:
+            P1[i] -= delta / sinkcounter
+        if P1[i] > tol:
+            P1[i] -= delta / sourcecounter
+
+    E1 = np.zeros((nc, ec))
+    for i, v in enumerate(nodeset):
+        for j_local, j_global in enumerate(edgeset):
+            E1[i, j_local] = E_full[v, j_global]
+
+    A1 = adjacencymatrix_from_incidence(E1)
+
+    def rhs(t, y):
+        return fswing(y, A1, P1, nc, I_INERTIA, d_damp, kappa)
+
+    # 与 figureS2.py 一致：离散时间网格 + solve_ivp，模拟 Julia DiscreteCallback
+    t_grid = np.linspace(0.0, 500.0, 1001)
+    sol = solve_ivp(rhs, (0.0, 500.0), psi, method='RK45',
+                    t_eval=t_grid, rtol=1e-8, atol=1e-8, max_step=1.0)
+
+    if not sol.success:
+        return empty_result
+
+    y_hist = sol.y
+    t_hist = sol.t
+    reason = 'timeout'
+    k_hit = len(t_hist) - 1
+    for k in range(1, len(t_hist)):
+        omega_k = y_hist[:nc, k]
+        theta_k = y_hist[nc:, k]
+        if np.linalg.norm(omega_k, 2) > synctol:
+            reason = 'desync'
+            k_hit = k
+            break
+        flow_k = edgepower(theta_k, E1, kappa) / maxflow
+        if np.any(np.abs(flow_k) > alpha):
+            reason = 'overload'
+            k_hit = k
+            break
+        if np.linalg.norm(fsteadystate(theta_k, A1, P1, kappa), 2) < 1e-6:
+            reason = 'converge'
+            k_hit = k
+            break
+
+    sim_time = float(t_hist[k_hit])
+    psi_f = y_hist[:, k_hit]
+    omega_f, theta_f = psi_f[:nc], psi_f[nc:]
+
+    if reason == 'desync' or np.linalg.norm(omega_f, 2) > synctol:
+        return {"surviving": 0, "rounds": [{"t": sim_time, "removed": ec}],
+                "total_time": t_offset + sim_time}
+
+    flow_f = edgepower(theta_f, E1, kappa) / maxflow
+    if not np.any(np.abs(flow_f) > alpha):
+        return {"surviving": ec, "rounds": [], "total_time": t_offset + sim_time}
+
+    removed_this_round = 0
+    survivor_local = []
+    for j_local in range(ec):
+        if abs(flow_f[j_local]) > alpha:
+            active_edges.discard(edgeset[j_local])
+            removed_this_round += 1
+        else:
+            survivor_local.append(j_local)
+
+    rounds = [{"t": sim_time, "removed": removed_this_round}]
+
+    if not survivor_local:
+        return {"surviving": 0, "rounds": rounds,
+                "total_time": t_offset + sim_time}
+
+    E2 = E1[:, survivor_local]
+    Adj2 = adjacencymatrix_from_incidence(E2)
+    _, comp_table = connected_components(Adj2)
+
+    total_surviving = 0
+    for comp in comp_table:
+        psi_comp = np.concatenate([omega_f[comp], theta_f[comp]])
+        sub_result = swingfracture_timed_parameterized(
+            E_full, active_edges, psi_comp,
+            [nodeset[c] for c in comp],
+            P, synctol, alpha, kappa, maxflow, d_damp,
+            t_offset=t_offset + sim_time
+        )
+        total_surviving += sub_result["surviving"]
+        rounds.extend(sub_result["rounds"])
+
+    total_time = max((r["t"] for r in rounds), default=sim_time) + t_offset
+    return {"surviving": total_surviving, "rounds": rounds,
+            "total_time": total_time}
+
+
+def _cascade_with_alpha_timed_parameterized(member, alpha, kappa, d_damp, synctol):
+    """参数化版带时间记录的级联（kappa, d_damp, synctol 显式传入）。"""
+    E = member['E']
+    P = member['P']
+    omega_ss = member['omega_ss']
+    theta_ss = member['theta_ss']
+    flowmax = member['flowmax']
+    d = member['d']
+    m = member['m']
+
+    if m == 0:
+        return {"surviving_frac": 0.0, "total_time": 0.0, "n_rounds": 0}
+
+    active_edges = set(range(m))
+    active_edges.discard(d)
+
+    E_remain = E[:, sorted(active_edges)]
+    A_remain = adjacencymatrix_from_incidence(E_remain)
+    _, comp_table = connected_components(A_remain)
+
+    total_surviving = 0
+    all_rounds = []
+    for comp in comp_table:
+        nodeset = comp
+        psi_comp = np.concatenate([omega_ss[comp], theta_ss[comp]])
+        result = swingfracture_timed_parameterized(
+            E, active_edges, psi_comp, nodeset,
+            P, synctol, alpha, kappa, flowmax, d_damp
+        )
+        total_surviving += result["surviving"]
+        all_rounds.extend(result["rounds"])
+
+    total_time = max((r["t"] for r in all_rounds), default=0.0)
+    return {
+        "surviving_frac": total_surviving / m,
+        "total_time": total_time,
+        "n_rounds": len(all_rounds),
+    }
+
+
+def compute_s2_curve(ratio_name, config, value, alpha_values, ensemble_size, seed):
+    """计算单条 S2 曲线：固定一个 sweep 变量值，遍历 alpha_values。
+
+    Parameters
+    ----------
+    ratio_name : str        "balanced" / "gen_heavy" / "load_heavy"
+    config : DurationSweepConfig
+    value : float/int       当前 sweep 变量值
+    alpha_values : ndarray  alpha 扫描数组
+    ensemble_size : int
+    seed : int
+
+    Returns
+    -------
+    dict with "value", "alpha", "tbar"
+    """
+    # 确定当前 (K, q) 和物理参数
+    if config.variable_name == "q":
+        K_val = config.K
+        q_val = float(value)
+    else:  # "K"
+        K_val = int(value)
+        q_val = config.q
+
+    kappa = config.kappa
+    d_damp = config.gamma  # gamma 即阻尼系数
+
+    base_seed = hash((ratio_name, config.panel, _fmt_value(value), seed)) % (2**31)
+    ensemble = _prepare_ensemble_parameterized(
+        ratio_name, K_val, q_val, ensemble_size, base_seed, kappa, d_damp
+    )
+
+    tbar = np.zeros(len(alpha_values))
+    if not ensemble:
+        return {"value": value, "alpha": alpha_values.copy(), "tbar": tbar}
+
+    for ai, alp in enumerate(alpha_values):
+        times = []
+        for member in ensemble:
+            result = _cascade_with_alpha_timed_parameterized(
+                member, alp, kappa, d_damp, SYNCTOL
+            )
+            times.append(result["total_time"])
+        tbar[ai] = np.mean(times) if times else 0.0
+
+    return {"value": value, "alpha": alpha_values.copy(), "tbar": tbar}
+
+
+def compute_s2_panel(ratio_name, config, alpha_values=None,
+                     ensemble_size=None, seed=None):
+    """计算一个面板所有曲线（per-value .npz 缓存）。
+
+    Parameters
+    ----------
+    ratio_name : str
+    config : DurationSweepConfig
+    alpha_values : ndarray, optional (default from S2_ALPHA_*)
+    ensemble_size : int, optional (default S2_ENSEMBLE_SIZE)
+    seed : int, optional (default S2_SEED)
+
+    Returns
+    -------
+    list of dict, each {"value", "alpha", "tbar"}
+    """
+    if alpha_values is None:
+        alpha_values = np.linspace(S2_ALPHA_MIN, S2_ALPHA_MAX, S2_ALPHA_RES)
+    if ensemble_size is None:
+        ensemble_size = S2_ENSEMBLE_SIZE
+    if seed is None:
+        seed = S2_SEED
+
+    alpha_res = len(alpha_values)
+    curves = []
+
+    for i, v in enumerate(tqdm(config.values,
+                                desc=f"[{ratio_name}] Panel {config.panel} "
+                                     f"({config.variable_name})",
+                                leave=False)):
+        cfile = _s2_cache_path(config.panel, config.variable_name, v,
+                               ratio_name, ensemble_size, alpha_res, seed)
+
+        if cfile.exists():
+            data = np.load(cfile)
+            curves.append({"value": v, "alpha": data["alpha"], "tbar": data["tbar"]})
+            print(f"  [cache hit] {cfile.name}")
+            continue
+
+        print(f"  [{config.panel}] {config.variable_name}={_fmt_value(v)} "
+              f"ratio={ratio_name} ens={ensemble_size}")
+        curve = compute_s2_curve(ratio_name, config, v, alpha_values,
+                                 ensemble_size, seed + 10_007 * i + ord(config.panel))
+        np.savez(cfile, alpha=curve["alpha"], tbar=curve["tbar"], value=v)
+        curves.append(curve)
+        print(f"  [saved] {cfile.name}")
+
+    return curves
 
 
 # ====================================================================

@@ -5,5 +5,7 @@ from .compute import (
     compute_cascade_bisection,
     compute_and_cache_duration,
     compute_cascade_duration,
+    compute_s2_panel,
+    compute_s2_curve,
 )
-from .plots import plot_all_bisection, plot_all_duration
+from .plots import plot_all_bisection, plot_all_duration, plot_figS2_duration

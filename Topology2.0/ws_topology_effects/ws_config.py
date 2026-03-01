@@ -4,6 +4,7 @@ ws_config.py — Global parameters for WS topology effects study.
 
 import numpy as np
 from pathlib import Path
+from dataclasses import dataclass
 
 # ── Network topology ──────────────────────────────────────────────
 N = 50                  # total number of nodes (PCC + households)
@@ -58,6 +59,42 @@ INTEREST_POINTS = [
 ]
 ALPHA_DURATION = [0.5, 1.0, 1.5, 2.0, 2.5]  # alpha 扫描范围
 DURATION_REALIZATIONS = 20                     # 每个 (点, alpha) 的 ensemble 数
+
+# ── Figure S2 风格：Duration sweep 配置 ─────────────────────────────
+@dataclass(frozen=True)
+class DurationSweepConfig:
+    """单个 sweep 面板的参数配置（q 扫描 或 K 扫描）。"""
+    panel: str               # "A"=q sweep, "B"=K sweep
+    variable_name: str       # "q" 或 "K"
+    variable_label: str      # LaTeX 图例标题
+    values: tuple
+    K: int = 8
+    q: float = 0.1
+    gamma: float = 1.0
+    kappa: float = 5.0
+    y_max: float = 50.0
+    color: str = "#c24c51"
+
+DURATION_SWEEP_PANELS = {
+    "A": DurationSweepConfig(
+        panel="A", variable_name="q", variable_label="$q$",
+        values=tuple(np.round(np.arange(0.0, 1.0 + 1e-9, 0.1), 1)),
+        K=4, gamma=1.0, kappa=1.0,
+        y_max=40.0, color="#97015E",
+    ),
+    "B": DurationSweepConfig(
+        panel="B", variable_name="K", variable_label="$K$",
+        values=(4, 6, 8, 10, 12),
+        q=0.1, gamma=1.0, kappa=1.0,
+        y_max=50.0, color="#c24c51",
+    ),
+}
+
+S2_ALPHA_MIN = 0.5
+S2_ALPHA_MAX = 2.5
+S2_ALPHA_RES = 50
+S2_ENSEMBLE_SIZE = 30
+S2_SEED = 42
 
 # ── Paths ─────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent

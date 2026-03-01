@@ -19,7 +19,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 
-from ws_config import K_list, q_list, RATIO_CONFIGS
+from ws_config import (
+    K_list, q_list, RATIO_CONFIGS,
+    DurationSweepConfig, DURATION_SWEEP_PANELS,
+)
 
 # ── 本模块的 cache / output 目录 ──
 _MODULE_DIR = Path(__file__).resolve().parent
@@ -560,3 +563,133 @@ def plot_all_duration():
         plot_cascade_duration_combined()
     except FileNotFoundError:
         print("  [skip] Missing duration cache for combined plot")
+
+
+# ====================================================================
+# 6. Figure S2 风格：Duration sweep 2×3 图
+# ====================================================================
+
+def _fmt_value(x):
+    """数值格式化：整数去小数点，浮点保留1位。"""
+    if abs(x - round(x)) < 1e-10:
+        return str(int(round(x)))
+    return f"{x:.1f}".rstrip("0").rstrip(".")
+
+
+def plot_s2_panel(ax, config, curves):
+    """绘制单个 S2 风格子图：同色系不同透明度的曲线 + 省略号图例。
+
+    移植自 reproduction/figureS2.py:plot_panel。
+
+    Parameters
+    ----------
+    ax : matplotlib Axes
+    config : DurationSweepConfig
+    curves : list of dict, each {"value", "alpha", "tbar"}
+    """
+    from matplotlib.lines import Line2D
+
+    values = [c["value"] for c in curves]
+    order = np.argsort(values)
+    n = len(curves)
+    alpha_lo, alpha_hi = (0.2, 1.0) if n > 5 else (0.3, 1.0)
+
+    for rank, idx in enumerate(order):
+        c = curves[idx]
+        a = alpha_lo + (alpha_hi - alpha_lo) * rank / max(1, n - 1)
+        ax.plot(c["alpha"], c["tbar"], color=config.color, alpha=a, lw=1.3)
+
+    ax.set_xlim(0.5, 2.5)
+    # 自适应 y 轴：取数据最大值的 1.2 倍，若 config.y_max 更小则用 config.y_max
+    data_max = max((np.max(c["tbar"]) for c in curves), default=1.0)
+    auto_ymax = max(data_max * 1.25, 0.5)  # 至少 0.5 避免太窄
+    y_max = min(auto_ymax, config.y_max) if config.y_max else auto_ymax
+    ax.set_ylim(0.0, y_max)
+    ax.set_xlabel(r"$\alpha/\alpha_{\ast}$")
+    ax.set_ylabel(r"$\overline{T}$", rotation=0, labelpad=10)
+
+    # 构建图例：>6 条时显示最大2 + 省略号 + 最小2
+    vals_sorted = sorted(values)
+    if n > 6:
+        shown_top = vals_sorted[-1::-1][:2]
+        shown_bot = vals_sorted[:2][::-1]
+        legend_entries = []
+        for v in shown_top:
+            legend_entries.append((v, _fmt_value(v)))
+        legend_entries.append((None, r"$\vdots$"))
+        for v in shown_bot:
+            legend_entries.append((v, _fmt_value(v)))
+    else:
+        legend_entries = [(v, _fmt_value(v)) for v in vals_sorted[::-1]]
+
+    handles = []
+    labels = []
+    for v, label in legend_entries:
+        if v is None:
+            h = Line2D([], [], color="none", marker="none", linestyle="None")
+        else:
+            rank_v = vals_sorted.index(v)
+            a = alpha_lo + (alpha_hi - alpha_lo) * rank_v / max(1, n - 1)
+            h = Line2D([], [], color=config.color, alpha=a, lw=2)
+        handles.append(h)
+        labels.append(label)
+
+    ax.legend(handles, labels,
+              title=config.variable_label,
+              loc="upper left", bbox_to_anchor=(1.0, 1.0),
+              frameon=False, fontsize=8, title_fontsize=9,
+              handlelength=1.5, labelspacing=0.4)
+
+
+def plot_figS2_duration(all_ratio_curves):
+    """生成 2×3 Figure S2 风格主图。
+
+    Parameters
+    ----------
+    all_ratio_curves : dict
+        {ratio_name: {panel_id: list_of_curve_dicts}}
+        例: {"balanced": {"A": [...], "B": [...]}, ...}
+    """
+    ratio_names = list(RATIO_CONFIGS.keys())
+    panel_ids = ["A", "B"]
+
+    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
+
+    for col, rn in enumerate(ratio_names):
+        for row, pid in enumerate(panel_ids):
+            ax = axes[row, col]
+            config = DURATION_SWEEP_PANELS[pid]
+
+            if rn in all_ratio_curves and pid in all_ratio_curves[rn]:
+                curves = all_ratio_curves[rn][pid]
+                plot_s2_panel(ax, config, curves)
+            else:
+                ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                        transform=ax.transAxes, color="gray")
+
+            # 行标题（左侧）
+            if col == 0:
+                ax.set_ylabel(r"$\overline{T}$", rotation=0, labelpad=10,
+                              fontsize=_FONT, va="center")
+
+            # 控制变量标注（最右列子图内部）
+            if col == 2:
+                if pid == "A":
+                    param_text = (rf"$K={config.K},\;\kappa={config.kappa},"
+                                  rf"\;\gamma={config.gamma}$")
+                else:
+                    param_text = (rf"$q={config.q},\;\kappa={config.kappa},"
+                                  rf"\;\gamma={config.gamma}$")
+                ax.text(0.97, 0.97, param_text, transform=ax.transAxes,
+                        fontsize=_TICK_FONT, ha="right", va="top",
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white",
+                                  ec="0.7", alpha=0.85))
+
+            # 列标题（顶部）
+            if row == 0:
+                ax.set_title(_RATIO_LABELS.get(rn, rn), fontsize=_TITLE_FONT,
+                             fontweight="bold")
+
+    fig.tight_layout(rect=[0, 0, 0.92, 1])
+    fig.subplots_adjust(hspace=0.20, wspace=0.30)
+    _save_fig(fig, "figS2_duration")
