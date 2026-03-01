@@ -53,8 +53,8 @@ RESULTS_DIR.mkdir(exist_ok=True)
 # ── 参数 ──────────────────────────────────────────────────────────
 K_VALUES = [4, 8]
 Q_VALUES = [0.0, 0.15, 1.0]
-RATIO_STEP = 5
-REALIZATIONS = 10
+RATIO_STEP = 10
+REALIZATIONS = 20
 ROLE_SEEDS = 5
 
 KAPPA_START = 5.5      # 与 reproduction/figure1.py 一致
