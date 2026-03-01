@@ -20,7 +20,7 @@ RESULTS_DIR.mkdir(exist_ok=True)
 
 K_VALUES = [4, 8]
 Q_VALUES = [0.0, 0.15, 1.0]
-N_HOUSEHOLDS = 49
+N_HOUSEHOLDS = 49  # cascade 默认值，stability 从数据自动检测
 
 
 def load_csv():
@@ -88,6 +88,9 @@ def generate_summary():
     out.write(section_header("0. Stability Summary (kappa_c)"))
 
     if has_stability:
+        stab_total = int(df_stab["ng"].iloc[0] + df_stab["nc"].iloc[0]
+                         + df_stab["np"].iloc[0])
+        out.write(f"节点总数: {stab_total}\n")
         out.write(f"数据条数: {len(df_stab)}\n")
         out.write(f"K 值: {sorted(df_stab['K'].unique())}\n")
         out.write(f"q 值: {sorted(df_stab['q'].unique())}\n")

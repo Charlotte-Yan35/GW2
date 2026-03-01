@@ -158,13 +158,16 @@ def connected_components(A):
 # 4. 比例网格
 # ====================================================================
 
-def build_ratio_grid(step=5):
+def build_ratio_grid(step=5, total=None):
     """生成三元单纯形网格 (ng, nc, np_count)，整数节点数。
 
-    ng + nc + np_count = N_HOUSEHOLDS = 49
+    ng + nc + np_count = total
     ng >= 1, nc >= 1, np_count >= 0
     step: 分母 (e.g. 5 -> 0.2 步长)
+    total: 节点总数。默认 N_HOUSEHOLDS (49)，cascade 向后兼容。
     """
+    if total is None:
+        total = N_HOUSEHOLDS
     pts = []
     for ig in range(1, step + 1):
         for ic in range(1, step + 1 - ig):
@@ -173,9 +176,9 @@ def build_ratio_grid(step=5):
                 continue
             rg = ig / step
             rc = ic / step
-            ng = max(1, round(rg * N_HOUSEHOLDS))
-            nc = max(1, round(rc * N_HOUSEHOLDS))
-            np_count = N_HOUSEHOLDS - ng - nc
+            ng = max(1, round(rg * total))
+            nc = max(1, round(rc * total))
+            np_count = total - ng - nc
             if np_count < 0:
                 if ng >= nc:
                     ng += np_count
@@ -218,3 +221,28 @@ def assign_roles(ng, nc, seed=0):
         node_types[con_nodes] = 2
 
     return P, node_types
+
+
+def assign_powers(n, n_plus, n_minus, Pmax=PMAX, seed=0):
+    """功率分配 (无 PCC，与 figure1.py 一致)。所有 n 节点参与。
+
+    Parameters
+    ----------
+    n : int       节点总数
+    n_plus : int  发电节点数
+    n_minus : int 消费节点数
+    Pmax : float  归一化最大功率
+    seed : int    随机种子
+
+    Returns
+    -------
+    P : ndarray (n,)
+    """
+    rng = np.random.default_rng(seed)
+    P = np.zeros(n)
+    if n_plus == 0 or n_minus == 0:
+        return P
+    indices = rng.permutation(n)
+    P[indices[:n_plus]] = Pmax / n_plus
+    P[indices[n_plus:n_plus + n_minus]] = -Pmax / n_minus
+    return P

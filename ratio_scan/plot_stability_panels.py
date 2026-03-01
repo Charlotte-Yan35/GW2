@@ -31,58 +31,63 @@ _DPI = 300
 
 K_VALUES = [4, 8]
 Q_VALUES = [0.0, 0.15, 1.0]
-N_HOUSEHOLDS = 49
 
 
 # ====================================================================
 # 三元坐标工具
 # ====================================================================
 
+H_TRI = np.sqrt(3) / 2
+
+
 def bary_to_cart(rg, rc, rp):
     """重心坐标 (rg, rc, rp) -> 2D 笛卡尔坐标。
 
-    顶点:
-        Generator (rg=1) -> 顶部   (0.5, sqrt(3)/2)
-        Consumer  (rc=1) -> 左下   (0, 0)
-        Passive   (rp=1) -> 右下   (1, 0)
+    与 figure1.py 一致的论文方向:
+        Generator (rg=1) -> 左下   (0, 0)
+        Consumer  (rc=1) -> 右下   (1, 0)
+        Passive   (rp=1) -> 顶部   (0.5, H_TRI)
     """
-    x = 0.5 * rg + rp
-    y = (np.sqrt(3) / 2) * rg
+    x = rc + 0.5 * rp
+    y = H_TRI * rp
     return x, y
 
 
 def draw_simplex_frame(ax):
-    """绘制等边三角形框架和顶点标签。"""
+    """绘制等边三角形框架和顶点标签 (论文方向)。"""
     verts = np.array([
-        [0.5, np.sqrt(3) / 2],   # Generator (顶)
-        [0.0, 0.0],               # Consumer (左下)
-        [1.0, 0.0],               # Passive (右下)
+        [0.0, 0.0],               # Generator (左下)
+        [1.0, 0.0],               # Consumer (右下)
+        [0.5, H_TRI],             # Passive (顶)
     ])
     triangle = plt.Polygon(verts, fill=False, edgecolor='k', linewidth=1.2)
     ax.add_patch(triangle)
 
     offset = 0.06
-    ax.text(verts[0, 0], verts[0, 1] + offset, "Generator",
+    ax.text(verts[0, 0] - offset, verts[0, 1] - offset, "Generator",
+            ha='center', va='top', fontsize=_TICK, fontweight='bold')
+    ax.text(verts[1, 0] + offset, verts[1, 1] - offset, "Consumer",
+            ha='center', va='top', fontsize=_TICK, fontweight='bold')
+    ax.text(verts[2, 0], verts[2, 1] + offset, "Passive",
             ha='center', va='bottom', fontsize=_TICK, fontweight='bold')
-    ax.text(verts[1, 0] - offset, verts[1, 1] - offset, "Consumer",
-            ha='center', va='top', fontsize=_TICK, fontweight='bold')
-    ax.text(verts[2, 0] + offset, verts[2, 1] - offset, "Passive",
-            ha='center', va='top', fontsize=_TICK, fontweight='bold')
 
     # 10% 增量网格线
     for frac in np.arange(0.1, 1.0, 0.1):
+        # 等 rg 线 (平行于 Consumer-Passive 边)
         x0, y0 = bary_to_cart(frac, 1 - frac, 0)
         x1, y1 = bary_to_cart(frac, 0, 1 - frac)
         ax.plot([x0, x1], [y0, y1], 'k-', lw=0.3, alpha=0.3)
+        # 等 rc 线 (平行于 Generator-Passive 边)
         x0, y0 = bary_to_cart(0, frac, 1 - frac)
         x1, y1 = bary_to_cart(1 - frac, frac, 0)
         ax.plot([x0, x1], [y0, y1], 'k-', lw=0.3, alpha=0.3)
+        # 等 rp 线 (平行于 Generator-Consumer 底边)
         x0, y0 = bary_to_cart(1 - frac, 0, frac)
         x1, y1 = bary_to_cart(0, 1 - frac, frac)
         ax.plot([x0, x1], [y0, y1], 'k-', lw=0.3, alpha=0.3)
 
-    ax.set_xlim(-0.12, 1.12)
-    ax.set_ylim(-0.15, 1.05)
+    ax.set_xlim(-0.08, 1.08)
+    ax.set_ylim(-0.10, H_TRI + 0.06)
     ax.set_aspect('equal')
     ax.axis('off')
 
@@ -117,10 +122,14 @@ def plot_kappa_c_panels(out_path=None):
 
     df = load_agg_csv()
 
+    # 自动检测节点总数 (兼容旧 49 和新 50)
+    total = int(df["ng"].iloc[0] + df["nc"].iloc[0] + df["np"].iloc[0])
+    print(f"检测到节点总数: {total}")
+
     # 计算比例和坐标
-    df["rg"] = df["ng"] / N_HOUSEHOLDS
-    df["rc"] = df["nc"] / N_HOUSEHOLDS
-    df["rp"] = df["np"] / N_HOUSEHOLDS
+    df["rg"] = df["ng"] / total
+    df["rc"] = df["nc"] / total
+    df["rp"] = df["np"] / total
     df["x"], df["y"] = bary_to_cart(df["rg"].values, df["rc"].values,
                                      df["rp"].values)
 
@@ -158,10 +167,10 @@ def plot_kappa_c_panels(out_path=None):
         for sub in data_dict.values():
             sub[plot_values_key] = np.log10(
                 sub["kappa_c_mean"].clip(lower=1e-10))
-        cbar_label = r'$\log_{10}(\kappa_c)$'
+        cbar_label = r'$\log_{10}(\overline{\kappa}_c)$'
     else:
         plot_values_key = "kappa_c_mean"
-        cbar_label = r'$\kappa_c$'
+        cbar_label = r'$\overline{\kappa}_c$'
 
     # 全局色阶范围
     all_z = []
@@ -196,18 +205,19 @@ def plot_kappa_c_panels(out_path=None):
                 interp = LinearTriInterpolator(tri, z)
 
                 xi = np.linspace(-0.05, 1.05, 200)
-                yi = np.linspace(-0.05, np.sqrt(3) / 2 + 0.05, 200)
+                yi = np.linspace(-0.05, H_TRI + 0.05, 200)
                 Xi, Yi = np.meshgrid(xi, yi)
                 Zi = interp(Xi, Yi)
 
-                Rg = 2 * Yi / np.sqrt(3)
-                Rp = Xi - Yi / np.sqrt(3)
-                Rc = 1 - Rg - Rp
+                # 新方向: rp=y/H, rc=x-y/(2H), rg=1-rc-rp
+                Rp = Yi / H_TRI
+                Rc = Xi - Yi / (2 * H_TRI)
+                Rg = 1 - Rc - Rp
                 mask_tri = (Rg < -0.01) | (Rc < -0.01) | (Rp < -0.01)
                 Zi = np.ma.masked_where(mask_tri, Zi)
 
                 levels = np.linspace(vmin, vmax, 20)
-                ax.contourf(Xi, Yi, Zi, levels=levels, cmap='magma_r',
+                ax.contourf(Xi, Yi, Zi, levels=levels, cmap='YlGnBu_r',
                             extend='both')
             except (RuntimeError, ValueError):
                 title += " (sparse)"
@@ -215,13 +225,13 @@ def plot_kappa_c_panels(out_path=None):
             ax.set_title(title, fontsize=_TITLE, fontweight='bold', pad=8)
 
             norm = plt.Normalize(vmin=vmin, vmax=vmax)
-            ax.scatter(x, y, c=z, cmap='magma_r', norm=norm,
+            ax.scatter(x, y, c=z, cmap='YlGnBu_r', norm=norm,
                        s=40, edgecolors='k', linewidths=0.5,
                        zorder=5, alpha=0.8)
 
     # 共享 colorbar
     cbar_ax = fig.add_axes([0.92, 0.15, 0.015, 0.7])
-    sm = plt.cm.ScalarMappable(cmap='magma_r',
+    sm = plt.cm.ScalarMappable(cmap='YlGnBu_r',
                                 norm=plt.Normalize(vmin=vmin, vmax=vmax))
     sm.set_array([])
     cbar = fig.colorbar(sm, cax=cbar_ax)

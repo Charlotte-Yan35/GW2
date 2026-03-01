@@ -30,17 +30,17 @@ from scipy.integrate import solve_ivp
 
 try:
     from ratio_scan.shared_utils import (
-        N, N_HOUSEHOLDS, PCC_NODE, PMAX, I_INERTIA, D_DAMP,
+        N, PMAX, I_INERTIA, D_DAMP,
         generate_ws_network,
         fswing, fsteadystate,
-        build_ratio_grid, assign_roles,
+        build_ratio_grid, assign_powers,
     )
 except ModuleNotFoundError:
     from shared_utils import (
-        N, N_HOUSEHOLDS, PCC_NODE, PMAX, I_INERTIA, D_DAMP,
+        N, PMAX, I_INERTIA, D_DAMP,
         generate_ws_network,
         fswing, fsteadystate,
-        build_ratio_grid, assign_roles,
+        build_ratio_grid, assign_powers,
     )
 
 # ── 路径 ──────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ def _integrate_swing(A, P, n, kappa, y0, t_max=200.0):
     """积分 Swing 方程，返回 (converged, y_final)。
 
     Warm-start 友好：接受任意初始条件 y0。
-    Gauge fixing: 收敛后将 theta 减去 theta[PCC_NODE]。
+    与 figure1.py integrate_swing 一致：无 gauge fixing。
     """
     def rhs(t, y, _A=A, _P=P, _n=n, _kappa=kappa):
         return fswing(y, _A, _P, _n, I_INERTIA, D_DAMP, _kappa)
@@ -94,10 +94,6 @@ def _integrate_swing(A, P, n, kappa, y0, t_max=200.0):
 
     y_final = sol.y[:, -1].copy()
     theta_final = y_final[n:]
-
-    # Gauge fixing: theta[PCC_NODE] = 0
-    theta_final -= theta_final[PCC_NODE]
-    y_final[n:] = theta_final
 
     resid = fsteadystate(theta_final, A, P, kappa)
     converged = np.linalg.norm(resid, 2) < 1e-5
@@ -183,7 +179,7 @@ def _compute_one_task(args):
 
     G = generate_ws_network(N, K, q, seed=net_seed)
     A = nx.to_numpy_array(G)  # 与 figure1.py 一致
-    P, _ = assign_roles(ng, nc, seed=role_seed)
+    P = assign_powers(N, ng, nc, seed=role_seed)
 
     rng_seed = make_seed("stability", K, q, ng, nc, net_seed, role_seed)
     kc = find_kappa_c(A, P, rng_seed)
@@ -210,11 +206,26 @@ def run_experiment(test_mode=False):
         realizations = REALIZATIONS
         role_seeds = ROLE_SEEDS
 
-    ratio_grid = build_ratio_grid(ratio_step)
+    ratio_grid = build_ratio_grid(ratio_step, total=N)  # N=50，无 PCC
     if test_mode:
         ratio_grid = ratio_grid[:3]
 
     raw_path = CACHE_DIR / "stability_results.csv"
+
+    # 旧缓存检测: 若已有数据 ng+nc+np=49 (旧 PCC 模式)，提示清除
+    if raw_path.exists():
+        import pandas as _pd
+        _df_check = _pd.read_csv(raw_path, nrows=5)
+        if {"ng", "nc", "np"}.issubset(_df_check.columns) and len(_df_check) > 0:
+            _row = _df_check.iloc[0]
+            _total = int(_row["ng"]) + int(_row["nc"]) + int(_row["np"])
+            if _total != N:
+                print(f"[WARN] 已有缓存 ng+nc+np={_total} (期望 {N})，"
+                      f"计算语义已变。请删除旧缓存:")
+                print(f"  rm -f {raw_path}")
+                print(f"  rm -f {CACHE_DIR / 'stability_agg.csv'}")
+                return
+        del _df_check
 
     # Resume: 读已有结果
     done_keys = set()

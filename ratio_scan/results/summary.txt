@@ -6,19 +6,18 @@ RATIO SCAN SUMMARY REPORT
 ============================================================
 0. Stability Summary (kappa_c)
 ============================================================
+节点总数: 50
 数据条数: 3
 K 值: [np.int64(4)]
 q 值: [np.float64(0.0)]
 
   K=4, q=0  (3 ratios)
-    Mean kappa_c:  0.0871
-    Std kappa_c:   0.0044
-    Min kappa_c:   0.0828  @ (ng=10, nc=29, np=10)
-    Max kappa_c:   0.0916  @ (ng=10, nc=10, np=29)
+    Mean kappa_c:  0.4007
+    Std kappa_c:   0.0328
+    Min kappa_c:   0.3645  @ (ng=10, nc=20, np=20)
+    Max kappa_c:   0.4285  @ (ng=10, nc=10, np=30)
 
   --- Spearman Correlation: kappa_c_mean vs alpha*_mean ---
-    K=4, q=0: rho=0.500, p=0.6667 (n=3)
-    Global: rho=0.500, p=0.6667 (n=3)
 
 数据条数 (清洗后): 3
 K 值: [np.int64(4)]
