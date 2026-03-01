@@ -7,9 +7,9 @@
   "kappa_start_override": null,
   "kappa_start_per_family": {
     "WS": 10.0,
-    "RGG": 15.0,
-    "SBM": 15.0,
-    "CP": 30.0
+    "RGG": 30.0,
+    "SBM": 30.0,
+    "CP": 50.0
   },
   "n_ratios": 45,
   "n_families": 4,
