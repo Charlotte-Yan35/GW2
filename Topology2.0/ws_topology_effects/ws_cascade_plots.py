@@ -137,7 +137,7 @@ def plot_bisection_heatmap(ratio_name):
                alpha=0.6, zorder=3)
 
     ax.set_xlabel("Rewiring probability $q$")
-    ax.set_ylabel("Degree $K$")
+    ax.set_ylabel("Mean degree $k$")
     ax.set_title(rf"Relative load $\overline{{\rho}}$ — {ratio_name}")
     ax.set_yticks(K)
 
@@ -228,7 +228,7 @@ def plot_bisection_combined_heatmap():
     vmin = min(np.nanmin(z) for z in Z_all.values())
     vmax = max(np.nanmax(z) for z in Z_all.values())
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 4.5), sharey=True,
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5.5), sharey=True,
                              gridspec_kw={"right": 0.88})
 
     cf = None
@@ -244,17 +244,65 @@ def plot_bisection_combined_heatmap():
         Qg, Kg = np.meshgrid(Q, K)
         ax.scatter(Qg.ravel(), Kg.ravel(), s=8, c="k", alpha=0.3, zorder=3)
 
+        # ── 标注原始网格上 ρ 最大值和最小值 ──
+        rho_raw = _get_rho(all_data[rn])
+        valid_mask = ~np.isnan(rho_raw)
+        if valid_mask.any():
+            # 找 max / min
+            idx_max = np.nanargmax(rho_raw)
+            ki_max, qi_max = np.unravel_index(idx_max, rho_raw.shape)
+            q_max, k_max, v_max = Q[qi_max], K[ki_max], rho_raw[ki_max, qi_max]
+
+            rho_valid = np.where(valid_mask, rho_raw, np.inf)
+            idx_min = np.argmin(rho_valid)
+            ki_min, qi_min = np.unravel_index(idx_min, rho_raw.shape)
+            q_min, k_min, v_min = Q[qi_min], K[ki_min], rho_raw[ki_min, qi_min]
+
+            # MAX 标注始终往上, MIN 标注始终往下
+            # 若两者的 K 值接近且 q 值也接近，则水平错开
+            _ann_kw = dict(textcoords="offset points", fontweight="bold",
+                           zorder=6, annotation_clip=False)
+            _arr_kw = dict(arrowstyle="-|>", lw=1.0)
+
+            # MAX ★
+            ax.plot(q_max, k_max, marker="*", color="blue", markersize=16,
+                    markeredgecolor="white", markeredgewidth=1.0, zorder=5)
+            max_off = (-60, 30) if q_max > 0.5 else (15, 30)
+            ax.annotate(f"MAX $\\rho$={v_max:.3f}\n($q$={q_max:.2f}, $K$={k_max})",
+                        xy=(q_max, k_max), xytext=max_off,
+                        fontsize=7.5, color="blue",
+                        bbox=dict(boxstyle="round,pad=0.2", fc="white",
+                                  ec="blue", alpha=0.85),
+                        arrowprops=dict(color="blue", **_arr_kw), **_ann_kw)
+
+            # MIN ★ — 标注放在图内上方，避免遮挡 x 轴
+            ax.plot(q_min, k_min, marker="*", color="green", markersize=16,
+                    markeredgecolor="white", markeredgewidth=1.0, zorder=5)
+            # 若 MIN 和 MAX 的 q 都在左侧，则 MIN 标注偏右；反之偏左
+            if abs(q_min - q_max) < 0.3 and q_min < 0.5:
+                min_off = (60, 40)
+            elif q_min > 0.5:
+                min_off = (-60, 40)
+            else:
+                min_off = (15, 40)
+            ax.annotate(f"MIN $\\rho$={v_min:.3f}\n($q$={q_min:.2f}, $K$={k_min})",
+                        xy=(q_min, k_min), xytext=min_off,
+                        fontsize=7.5, color="green",
+                        bbox=dict(boxstyle="round,pad=0.2", fc="white",
+                                  ec="green", alpha=0.85),
+                        arrowprops=dict(color="green", **_arr_kw), **_ann_kw)
+
         ax.set_xlabel("Rewiring probability $q$")
         ax.set_title(_RATIO_LABELS[rn], fontsize=_FONT)
         ax.set_yticks(K)
 
-    axes[0].set_ylabel("Degree $K$")
+    axes[0].set_ylabel("Mean degree $k$")
 
-    cbar_ax = fig.add_axes([0.90, 0.12, 0.015, 0.76])
+    cbar_ax = fig.add_axes([0.90, 0.10, 0.015, 0.78])
     cb = fig.colorbar(cf, cax=cbar_ax)
     cb.set_label(r"$\overline{\rho}$")
 
-    fig.subplots_adjust(wspace=0.08, top=0.92)
+    fig.subplots_adjust(wspace=0.08, top=0.92, bottom=0.15)
     _save_fig(fig, "combined_cascade_bisection_heatmap")
 
 
