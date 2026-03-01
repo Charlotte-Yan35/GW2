@@ -20,6 +20,9 @@ reproduction/output/   # 输出图片
 2nodes/                # 两节点稳定性分析
 household/             # 家庭用电 / 光伏 / 微电网分析
 Topology2.0/           # 拓扑与韧性扩展实验
+  ws_topology_effects/   # WS 拓扑效应：κ_c 映射、Lorenz/Gini 分析、级联二分搜索
+  experiment_ratio_simplex/ # 三元单纯形：4 种拓扑族 (WS/RGG/SBM/CP) × 节点配比扫描
+  cascade_resilience/    # 级联韧性：恢复时间、服务水平 S_PCC(t)、3D 参数扫描
 Q1Topology/            # Q1 作业：WS 网络分析
 data/                  # 原始数据 (LCL / PV)
 reference_code/        # 教师原始 Julia/Python 参考实现
@@ -29,7 +32,7 @@ docs/                  # 文档
 ## Critical Rules
 
 - **NEVER delete `reproduction/cache/` 中的文件**。这些 `.npz` 缓存文件计算成本极高（数小时到数天），且可能不在 git 历史中。修改脚本时必须保留已有缓存逻辑。
-- **NEVER delete `Topology2.0/` 中的缓存目录**，同理。
+- **NEVER delete `Topology2.0/` 中的缓存目录**（`ws_topology_effects/cache/`、`experiment_ratio_simplex/cache/`、`cascade_resilience/cache/`），同理。
 - 修改复现脚本时，确保缓存命中逻辑不变（先检查缓存文件是否存在，存在则跳过计算）。
 
 ## Running Scripts
