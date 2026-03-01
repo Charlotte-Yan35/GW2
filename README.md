@@ -15,6 +15,9 @@ GW2/
 │   ├── ws_topology_effects/      # WS 拓扑效应 (κ_c、Gini、级联二分)
 │   ├── experiment_ratio_simplex/ # 三元单纯形 × 4 种拓扑族
 │   └── cascade_resilience/       # 级联恢复时间与服务水平分析
+├── ratio_scan/             # 节点配比扫描：α* 三元热力图、失效模式分析
+│   ├── cache/                    # 扫描结果缓存
+│   └── results/                  # 输出图片与摘要报告
 ├── Q1Topology/             # Q1 作业：Watts-Strogatz 网络分析
 ├── data/                   # 原始数据（LCL / PV / xlsx 等）
 ├── docs/                   # 文档与复现说明
@@ -212,7 +215,26 @@ python Topology2.0/cascade_resilience/plots_recovery_panels.py
 输出：`Topology2.0/cascade_resilience/output/`
 缓存：`Topology2.0/cascade_resilience/cache/`（**请勿删除**）
 
-### 5) Q1 作业（`Q1Topology/`）
+### 5) 节点配比扫描（`ratio_scan/`）
+
+研究节点组成（发电机 $n_g$ / 负荷 $n_c$ / 被动节点 $n_p$）如何影响 WS 网络的级联韧性。对所有配比组合 × 6 种拓扑（K×q）通过二分搜索找到临界过载容忍度 $\alpha^*$，并分析失效模式。
+
+| 脚本 | 说明 |
+|------|------|
+| `run_ratio_scan.py` | 多进程并行扫描配比空间，二分搜索 α*，缓存至 CSV |
+| `plot_simplex_panels.py` | 2×3 三元热力图面板（α* 分布 + 失效模式区域） |
+| `generate_summary.py` | 生成结构化文本摘要报告 |
+
+```bash
+python ratio_scan/run_ratio_scan.py
+python ratio_scan/plot_simplex_panels.py
+python ratio_scan/generate_summary.py
+```
+
+输出：`ratio_scan/results/`（`fig_alpha_star_panels.png`、`fig_failure_mode_panels.png`、`summary.txt`）
+缓存：`ratio_scan/cache/`（**请勿删除**）
+
+### 6) Q1 作业（`Q1Topology/`）
 
 - `ws_kappa_c/` — 临界耦合 $\kappa_c$ vs 重连概率 $q$ 与平均度 $k$
 - `ws_percolation/` — 网络渗流分析
@@ -229,6 +251,7 @@ python Topology2.0/cascade_resilience/plots_recovery_panels.py
 | WS 拓扑效应 | `Topology2.0/ws_topology_effects/output/` |
 | 三元单纯形 | `Topology2.0/experiment_ratio_simplex/figures/` |
 | 级联韧性 | `Topology2.0/cascade_resilience/output/` |
+| 节点配比扫描 | `ratio_scan/results/` |
 
 ## 说明
 
