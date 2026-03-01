@@ -11,6 +11,8 @@ from ws_plots import (
     plot_cascade_size_vs_q,
 )
 from ws_plots_combined import plot_all_combined
+from ws_cascade_compute import compute_and_cache_bisection
+from ws_cascade_plots import plot_all_bisection
 
 
 def main() -> None:
@@ -28,8 +30,15 @@ def main() -> None:
         plot_gini_vs_q(ratio_name)
         plot_cascade_size_vs_q(ratio_name)
 
+    # ── cascade bisection ──
+    for ratio_name in RATIO_CONFIGS:
+        compute_and_cache_bisection(ratio_name)
+
     # ── combined comparison plots ──
     plot_all_combined()
+
+    # ── cascade bisection plots ──
+    plot_all_bisection()
 
     print("\nAll done.")
 

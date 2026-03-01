@@ -19,6 +19,13 @@ realizations = 20                    # Monte-Carlo realizations per (K, q)
 K_ref = 8                            # reference degree for Lorenz / cascade plots
 alpha = 0.2                          # power tolerance for cascade model
 
+# ── Swing cascade parameters ─────────────────────────────────
+KAPPA_CASCADE = 5.0       # 级联计算用的耦合强度 (同论文)
+I_INERTIA = 1.0           # 惯量
+D_DAMP = 1.0              # 阻尼
+SYNCTOL = 3.0             # 失同步容限
+BISECT_TOL = 5e-4         # 二分法精度
+
 # ── Ratio configurations (PCC does not participate in ratio) ─────
 # n_gen + n_load = 49 (household nodes only); Pmax normalised to 1.0
 RATIO_CONFIGS = {

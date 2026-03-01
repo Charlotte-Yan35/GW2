@@ -10,6 +10,7 @@ import time
 import json
 import csv
 from pathlib import Path
+from multiprocessing import Pool, cpu_count
 
 import numpy as np
 import networkx as nx
@@ -18,7 +19,36 @@ from scipy.spatial.distance import pdist, squareform
 # ── Import κ_c machinery from ws_compute.py ─────────────────────
 WS_DIR = Path(__file__).resolve().parent.parent / "ws_topology_effects"
 sys.path.insert(0, str(WS_DIR))
-from ws_compute import _integrate_swing, _steady_state_residual  # noqa: E402
+from ws_compute import _steady_state_residual  # noqa: E402
+from ws_compute import _integrate_swing as _integrate_swing_strict  # noqa: E402
+
+
+def _integrate_swing(A, P, n, kappa, y0, t_max=200.0):
+    """Wrapper with relaxed convergence tolerance (1e-4 instead of 1e-5).
+
+    异质拓扑（RGG/SBM/CP）的残差往往略高于 1e-5，放宽到 1e-4 避免假阴性。
+    """
+    from scipy.integrate import solve_ivp
+
+    def rhs(t, y):
+        omega = y[:n]
+        theta = y[n:]
+        diff = theta[:, None] - theta[None, :]
+        coupling = np.sum(A * np.sin(diff), axis=1)
+        domega = (P - 1.0 * omega - kappa * coupling) / 1.0  # D=1, I=1
+        dtheta = omega
+        return np.concatenate([domega, dtheta])
+
+    sol = solve_ivp(rhs, [0, t_max], y0, method='RK45',
+                    rtol=1e-8, atol=1e-8, max_step=1.0)
+    if sol.status != 0:
+        return False, y0
+
+    y_final = sol.y[:, -1]
+    theta_final = y_final[n:]
+    resid = _steady_state_residual(theta_final, A, P, kappa)
+    converged = np.linalg.norm(resid, 2) < 1e-4  # 放宽容差
+    return converged, y_final
 
 # ── Directories ──────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
@@ -37,10 +67,11 @@ def _find_kappa_c(A: np.ndarray, P: np.ndarray, n: int,
 
     Tries multiple initial conditions for robust convergence on
     heterogeneous network topologies like core-periphery.
+    当 warm-start 失败时，用多个新初始条件重试，避免在异质拓扑上卡住。
     """
     kappa = kappa_start
 
-    # Try several initial conditions at kappa_start
+    # 多个初始条件，用于初始收敛和 warm-start 失败时的重试
     inits = [
         np.zeros(2 * n),                                    # zero
         np.concatenate([np.zeros(n), 0.01 * np.random.randn(n)]),  # small θ
@@ -61,7 +92,16 @@ def _find_kappa_c(A: np.ndarray, P: np.ndarray, n: int,
     kappa_old = kappa
 
     while True:
+        # 1. 先用 warm-start 试（快速路径）
         converged, y_sol = _integrate_swing(A, P, n, kappa, y_last, t_max=100.0)
+
+        # 2. warm-start 失败时，用多个新初始条件重试（关键修复）
+        if not converged:
+            for y0 in inits:
+                converged, y_sol = _integrate_swing(A, P, n, kappa, y0, t_max=200.0)
+                if converged:
+                    break
+
         if converged:
             y_last = y_sol
             if stepsize < tol:
@@ -85,7 +125,7 @@ PMAX = 1.0
 FAMILIES = ["WS", "RGG", "SBM", "CP"]
 FAMILY_IDX = {f: i for i, f in enumerate(FAMILIES)}
 # Per-family κ bisection start (CP needs higher due to heterogeneous degree)
-KAPPA_START = {"WS": 10.0, "RGG": 15.0, "SBM": 15.0, "CP": 30.0}
+KAPPA_START = {"WS": 10.0, "RGG": 30.0, "SBM": 30.0, "CP": 50.0}
 
 
 # ====================================================================
@@ -406,11 +446,45 @@ def assign_roles(ng: int, nc: int, n_households: int = N_HOUSEHOLDS,
 # 4. Main computation loop
 # ====================================================================
 
+def _compute_one_task(args):
+    """单个 (ratio, family, realisation) 的计算（用于多进程）"""
+    rg, rc, rp, ng, nc, np_count, family, r, seed, ks = args
+
+    np.random.seed(seed)
+
+    # Generate network
+    gen_func = GENERATORS[family]
+    G = gen_func(seed=seed)
+    md = household_mean_degree(G)
+    connected = nx.is_connected(G)
+
+    if not connected:
+        for retry in range(1, 11):
+            G = gen_func(seed=seed + retry * 10000)
+            G = _ensure_connected(G)
+            connected = nx.is_connected(G)
+            if connected:
+                break
+
+    # Build adjacency and power vector
+    A = nx.to_numpy_array(G, nodelist=range(N))
+    P = assign_roles(ng, nc, seed=seed + 50000)
+
+    # Find κ_c
+    kc = _find_kappa_c(A, P, N, kappa_start=ks)
+
+    return [rg, rc, rp, ng, nc, np_count,
+            family, r, seed, f"{md:.3f}",
+            f"{kc:.6f}" if not np.isnan(kc) else "NaN",
+            int(connected)]
+
+
 def run_experiment(R: int = 30, step: float = 0.1,
                    kappa_start: float = None) -> None:
     """Main loop: for each (ratio, family, realisation) → find κ_c.
 
     kappa_start: if None, uses per-family defaults from KAPPA_START dict.
+    使用 multiprocessing 并行计算。
     Saves raw_results.csv, agg_results.csv, and metadata.json to cache/.
     """
     ratio_grid = build_ratio_grid(step=step)
@@ -435,6 +509,26 @@ def run_experiment(R: int = 30, step: float = 0.1,
                 done_keys.add(key)
         print(f"Resuming: {len(done_keys)} tasks already completed")
 
+    # 构建任务列表，过滤已完成的
+    tasks = []
+    for ri, (rg, rc, rp) in enumerate(ratio_grid):
+        ng, nc, np_count = ratios_to_counts(rg, rc, rp)
+        for fi, family in enumerate(FAMILIES):
+            for r in range(R):
+                key = (str(rg), str(rc), str(rp), family, str(r))
+                if key in done_keys:
+                    continue
+                seed = ri * 1000 + fi * 100 + r
+                ks = kappa_start if kappa_start is not None else KAPPA_START[family]
+                tasks.append((rg, rc, rp, ng, nc, np_count, family, r, seed, ks))
+
+    print(f"Tasks to compute: {len(tasks)} (skipped {len(done_keys)} already done)")
+
+    if not tasks:
+        print("All tasks already completed!")
+        _aggregate_results(raw_path, agg_path)
+        return
+
     # Open CSV for appending
     write_header = not raw_path.exists() or len(done_keys) == 0
     raw_file = open(raw_path, "a", newline="")
@@ -447,56 +541,25 @@ def run_experiment(R: int = 30, step: float = 0.1,
 
     t_start = time.time()
     done = len(done_keys)
+    n_workers = max(1, cpu_count() - 1)
+    print(f"Using {n_workers} worker processes")
 
-    for ri, (rg, rc, rp) in enumerate(ratio_grid):
-        ng, nc, np_count = ratios_to_counts(rg, rc, rp)
-        for fi, family in enumerate(FAMILIES):
-            gen_func = GENERATORS[family]
-            for r in range(R):
-                key = (str(rg), str(rc), str(rp), family, str(r))
-                if key in done_keys:
-                    continue
+    with Pool(n_workers) as pool:
+        for result in pool.imap_unordered(_compute_one_task, tasks, chunksize=4):
+            raw_writer.writerow(result)
+            raw_file.flush()
 
-                seed = ri * 1000 + fi * 100 + r
-                np.random.seed(seed)
-
-                # Generate network
-                G = gen_func(seed=seed)
-                md = household_mean_degree(G)
-                connected = nx.is_connected(G)
-
-                if not connected:
-                    # Retry up to 10 times
-                    for retry in range(1, 11):
-                        G = gen_func(seed=seed + retry * 10000)
-                        G = _ensure_connected(G)
-                        connected = nx.is_connected(G)
-                        if connected:
-                            break
-
-                # Build adjacency and power vector
-                A = nx.to_numpy_array(G, nodelist=range(N))
-                P = assign_roles(ng, nc, seed=seed + 50000)
-
-                # Find κ_c (per-family start or user override)
-                ks = kappa_start if kappa_start is not None else KAPPA_START[family]
-                kc = _find_kappa_c(A, P, N, kappa_start=ks)
-
-                raw_writer.writerow([rg, rc, rp, ng, nc, np_count,
-                                     family, r, seed, f"{md:.3f}",
-                                     f"{kc:.6f}" if not np.isnan(kc) else "NaN",
-                                     int(connected)])
-                raw_file.flush()
-
-                done += 1
-                if done % 10 == 0:
-                    elapsed = time.time() - t_start
-                    rate = done / elapsed if elapsed > 0 else 0
-                    eta = (total_tasks - done) / rate if rate > 0 else 0
-                    print(f"  [{done}/{total_tasks}] "
-                          f"ratio=({rg},{rc},{rp}) family={family} r={r} "
-                          f"κ_c={kc:.4f} md={md:.2f} "
-                          f"ETA={eta/60:.1f}min")
+            done += 1
+            if done % 50 == 0:
+                elapsed = time.time() - t_start
+                rate = (done - len(done_keys)) / elapsed if elapsed > 0 else 0
+                remaining = total_tasks - done
+                eta = remaining / rate if rate > 0 else 0
+                family = result[6]
+                kc = result[10]
+                print(f"  [{done}/{total_tasks}] "
+                      f"family={family} κ_c={kc} "
+                      f"rate={rate:.1f}/s ETA={eta/60:.1f}min")
 
     raw_file.close()
     print(f"\nRaw results saved → {raw_path}")
