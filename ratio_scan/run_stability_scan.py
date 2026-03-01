@@ -25,19 +25,20 @@ from pathlib import Path
 from multiprocessing import Pool, cpu_count
 
 import numpy as np
+import networkx as nx
 from scipy.integrate import solve_ivp
 
 try:
     from ratio_scan.shared_utils import (
         N, N_HOUSEHOLDS, PCC_NODE, PMAX, I_INERTIA, D_DAMP,
-        generate_ws_network, build_incidence_matrix, adjacencymatrix_from_incidence,
+        generate_ws_network,
         fswing, fsteadystate,
         build_ratio_grid, assign_roles,
     )
 except ModuleNotFoundError:
     from shared_utils import (
         N, N_HOUSEHOLDS, PCC_NODE, PMAX, I_INERTIA, D_DAMP,
-        generate_ws_network, build_incidence_matrix, adjacencymatrix_from_incidence,
+        generate_ws_network,
         fswing, fsteadystate,
         build_ratio_grid, assign_roles,
     )
@@ -56,7 +57,8 @@ RATIO_STEP = 5
 REALIZATIONS = 10
 ROLE_SEEDS = 5
 
-KAPPA_START = 10.0
+KAPPA_START = 5.5      # 与 reproduction/figure1.py 一致
+KAPPA_STEP_INIT = 0.1  # 与 reproduction/figure1.py 一致
 KAPPA_TOL = 1e-3
 
 CSV_HEADER = ["K", "q", "ng", "nc", "np", "net_seed", "role_seed", "kappa_c"]
@@ -106,10 +108,11 @@ def _integrate_swing(A, P, n, kappa, y0, t_max=200.0):
 # Warm-start 递降搜索 kappa_c (与参考代码一致)
 # ====================================================================
 
-def find_kappa_c(A, P, rng_seed, kappa_start=None, step_init=0.2,
+def find_kappa_c(A, P, rng_seed, kappa_start=None, step_init=None,
                  tol=None):
     """Warm-start 递降搜索 kappa_c。
 
+    与 reproduction/figure1.py find_kappa_c 算法一致:
     从高 kappa 开始积分求稳态，然后逐步降低 kappa，
     每次用上一步的稳态解作为初始条件 (warm-start)。
     失败时步长减半并回退，收敛条件: stepsize < tol。
@@ -118,6 +121,8 @@ def find_kappa_c(A, P, rng_seed, kappa_start=None, step_init=0.2,
     """
     if kappa_start is None:
         kappa_start = KAPPA_START
+    if step_init is None:
+        step_init = KAPPA_STEP_INIT
     if tol is None:
         tol = KAPPA_TOL
 
@@ -177,7 +182,7 @@ def _compute_one_task(args):
     K, q, ng, nc, np_count, net_seed, role_seed = args
 
     G = generate_ws_network(N, K, q, seed=net_seed)
-    A = adjacencymatrix_from_incidence(build_incidence_matrix(G))
+    A = nx.to_numpy_array(G)  # 与 figure1.py 一致
     P, _ = assign_roles(ng, nc, seed=role_seed)
 
     rng_seed = make_seed("stability", K, q, ng, nc, net_seed, role_seed)
