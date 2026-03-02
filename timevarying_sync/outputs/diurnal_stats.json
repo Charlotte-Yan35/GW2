@@ -1,44 +1,44 @@
 {
   "summer": {
-    "kc_mean_all": 0.1185,
-    "kc_std_all": 0.0337,
-    "kc_max_hour": 12,
+    "kc_mean_all": 0.1209,
+    "kc_std_all": 0.0344,
+    "kc_max_hour": 11,
     "kc_max_value": 0.1967,
     "kc_min_hour": 0,
     "kc_min_value": 0.1,
     "pearson_power_vs_kc": {
-      "r": 0.8812,
+      "r": 0.9069,
       "p": 0.0
     },
     "peak_vs_offpeak_mannwhitney": {
-      "U_statistic": 427.5,
-      "p_value": 0.98686,
-      "test_description": "Mann-Whitney U test: 庥_c(peak hours) > 庥_c(off-peak)"
+      "U_statistic": 36900.0,
+      "p_value": 1.0,
+      "test_description": "Mann-Whitney U test: 百_c(peak hours) > 百_c(off-peak)"
     }
   },
   "winter": {
-    "kc_mean_all": 0.1113,
-    "kc_std_all": 0.0284,
+    "kc_mean_all": 0.1266,
+    "kc_std_all": 0.0439,
     "kc_max_hour": 19,
-    "kc_max_value": 0.1967,
+    "kc_max_value": 0.274,
     "kc_min_hour": 0,
     "kc_min_value": 0.1,
     "pearson_power_vs_kc": {
-      "r": 0.7913,
-      "p": 4e-06
+      "r": 0.8435,
+      "p": 0.0
     },
     "peak_vs_offpeak_mannwhitney": {
-      "U_statistic": 747.0,
-      "p_value": 0.000844,
-      "test_description": "Mann-Whitney U test: 庥_c(peak hours) > 庥_c(off-peak)"
+      "U_statistic": 78300.0,
+      "p_value": 0.0,
+      "test_description": "Mann-Whitney U test: 百_c(peak hours) > 百_c(off-peak)"
     }
   },
   "summer_vs_winter": {
     "paired_ttest": {
-      "t_statistic": 0.7155,
-      "p_value": 0.481495,
-      "test_description": "Paired t-test on hourly mean 庥_c: summer vs winter"
+      "t_statistic": -0.4242,
+      "p_value": 0.675361,
+      "test_description": "Paired t-test on hourly mean 百_c: summer vs winter"
     },
-    "mean_diff": 0.0073
+    "mean_diff": -0.0056
   }
 }
