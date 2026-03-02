@@ -152,13 +152,13 @@ def compute_sliding_autocorr(r, window_size, lag=1):
 def run_one_realization(args_tuple):
     """单次 realization (可被 multiprocessing 调用)。"""
     (idx, child_seed_entropy, season, t_grid, kappa,
-     K_bar, q_rewire, use_synthetic, window_pts) = args_tuple
+     K_bar, q_rewire, data_mode, window_pts) = args_tuple
 
     rng = np.random.default_rng(child_seed_entropy)
 
-    # 1) 构建 data-driven 曲线
+    # 1) 构建日曲线
     profiles = build_daily_profiles_for_realization(season, rng,
-                                                    use_synthetic=use_synthetic)
+                                                    data_mode=data_mode)
 
     # 2) 构建 P_k(t)
     P_matrix, _ = build_node_injections(profiles, t_grid, balance_at_pcc=True)
@@ -194,7 +194,7 @@ def run_one_realization(args_tuple):
 # ═══════════════════════════════════════════════════════════════
 
 def run_ensemble(season, t_grid, n_real, base_seed, kappa,
-                 K_bar, q_rewire, use_synthetic, n_workers):
+                 K_bar, q_rewire, data_mode, n_workers):
     """运行 ensemble 仿真，返回汇总结果。"""
     freq_sec = t_grid[1] - t_grid[0]
     window_pts = max(2, int(SLIDING_WINDOW_SEC / freq_sec))
@@ -206,7 +206,7 @@ def run_ensemble(season, t_grid, n_real, base_seed, kappa,
 
     job_args = [
         (i, child_entropies[i], season, t_grid, kappa,
-         K_bar, q_rewire, use_synthetic, window_pts)
+         K_bar, q_rewire, data_mode, window_pts)
         for i in range(n_real)
     ]
 
@@ -291,8 +291,11 @@ def parse_args(argv=None):
                    help="WS 平均度")
     p.add_argument("--q", type=float, default=Q_REWIRE,
                    help="WS 重连概率")
+    p.add_argument("--data-mode", choices=["processed", "raw", "synthetic"],
+                   default="processed",
+                   help="数据模式: processed=预处理聚合CSV(快), raw=原始CSV(慢), synthetic=合成曲线")
     p.add_argument("--synthetic", action="store_true",
-                   help="使用合成曲线 (不依赖真实数据)")
+                   help="(快捷方式) 等同于 --data-mode synthetic")
     p.add_argument("--out-prefix", default=None,
                    help="输出文件前缀 (默认 results)")
     p.add_argument("--workers", type=int, default=1,
@@ -307,16 +310,26 @@ def main():
         from multiprocessing import cpu_count
         args.workers = cpu_count()
 
+    # --synthetic 快捷方式覆盖 --data-mode
+    data_mode = "synthetic" if args.synthetic else args.data_mode
+
     # 时间网格
     freq_sec = pd.Timedelta(args.freq).total_seconds()
     t_grid = np.arange(0, T_TOTAL + freq_sec / 2, freq_sec)
+
+    # 数据模式显示名
+    _mode_labels = {
+        "processed": "预处理聚合CSV (household/)",
+        "raw": "原始CSV (data-driven LCL+PV)",
+        "synthetic": "合成曲线",
+    }
 
     # 打印配置摘要
     print("=" * 60)
     print("时变 P_k(t) 同步仿真 — 配置摘要")
     print("=" * 60)
     print(f"  季节       : {args.season} (month={7 if args.season=='summer' else 1})")
-    print(f"  数据源     : {'合成曲线' if args.synthetic else 'data-driven (LCL+PV)'}")
+    print(f"  数据源     : {_mode_labels.get(data_mode, data_mode)}")
     print(f"  频率       : {args.freq} ({freq_sec:.0f} s)")
     print(f"  时间范围   : 0 – {T_TOTAL:.0f} s (24h), {len(t_grid)} 个评估点")
     print(f"  网络       : WS(N={N}, K={args.K}, q={args.q})")
@@ -336,7 +349,7 @@ def main():
         kappa=args.kappa,
         K_bar=args.K,
         q_rewire=args.q,
-        use_synthetic=args.synthetic,
+        data_mode=data_mode,
         n_workers=args.workers,
     )
     elapsed = time.time() - t0
@@ -356,7 +369,8 @@ def main():
         "D": D_DAMP,
         "synctol": SYNCTOL,
         "PCC_node": PCC_NODE,
-        "synthetic": args.synthetic,
+        "data_mode": data_mode,
+        "synthetic": data_mode == "synthetic",
         "elapsed_sec": elapsed,
     }
 

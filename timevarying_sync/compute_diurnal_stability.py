@@ -115,14 +115,14 @@ def _worker_hourly_kc(args):
       pcc_abs_power: (24,) PCC 节点 |P_PCC|
       node_power_std: (24,) 节点功率标准差 std(P_k)
     """
-    (idx, child_seed_entropy, season, use_synthetic,
+    (idx, child_seed_entropy, season, data_mode,
      K_bar, q_rewire) = args
 
     rng = np.random.default_rng(child_seed_entropy)
 
     # 构建日曲线
     profiles = build_daily_profiles_for_realization(
-        season, rng, use_synthetic=use_synthetic)
+        season, rng, data_mode=data_mode)
 
     # 时间网格: 每小时一个点 (0, 3600, ..., 82800) + 86400
     hourly_secs = np.arange(0, 25) * 3600.0  # 25 个点覆盖 0-24h
@@ -160,7 +160,7 @@ def _worker_hourly_kc(args):
     }
 
 
-def run_hourly_kc(season, n_real, base_seed, use_synthetic,
+def run_hourly_kc(season, n_real, base_seed, data_mode,
                   K_bar, q_rewire, n_workers):
     """集合仿真: R 次 realization, 每次 24 小时 × 二分搜索。"""
     ss = np.random.SeedSequence(base_seed)
@@ -168,7 +168,7 @@ def run_hourly_kc(season, n_real, base_seed, use_synthetic,
     child_entropies = [cs.entropy for cs in child_seeds]
 
     job_args = [
-        (i, child_entropies[i], season, use_synthetic, K_bar, q_rewire)
+        (i, child_entropies[i], season, data_mode, K_bar, q_rewire)
         for i in range(n_real)
     ]
 
@@ -208,14 +208,14 @@ def _worker_kappa_sweep(args):
     """单次 realization: 对多个 κ 值各跑 24h 仿真, 记录 r(t)。"""
     from scipy.interpolate import interp1d as _interp1d
 
-    (idx, child_seed_entropy, season, use_synthetic,
+    (idx, child_seed_entropy, season, data_mode,
      K_bar, q_rewire, kappa_values) = args
 
     rng = np.random.default_rng(child_seed_entropy)
 
     # 构建日曲线
     profiles = build_daily_profiles_for_realization(
-        season, rng, use_synthetic=use_synthetic)
+        season, rng, data_mode=data_mode)
 
     # 5min 时间网格
     t_grid = np.arange(0, T_TOTAL + 150, 300.0)
@@ -264,7 +264,7 @@ def _worker_kappa_sweep(args):
     return {"r_matrix": r_matrix}
 
 
-def run_kappa_sweep(season, n_real, base_seed, use_synthetic,
+def run_kappa_sweep(season, n_real, base_seed, data_mode,
                     K_bar, q_rewire, n_workers,
                     kappa_values=None):
     """多 κ × 24h 扫描, 返回平均 r(κ, h) 热力图数据。"""
@@ -276,7 +276,7 @@ def run_kappa_sweep(season, n_real, base_seed, use_synthetic,
     child_entropies = [cs.entropy for cs in child_seeds]
 
     job_args = [
-        (i, child_entropies[i], season, use_synthetic,
+        (i, child_entropies[i], season, data_mode,
          K_bar, q_rewire, kappa_values)
         for i in range(n_real)
     ]
@@ -349,8 +349,11 @@ def parse_args(argv=None):
                    help="WS 平均度")
     p.add_argument("--q", type=float, default=Q_REWIRE,
                    help="WS 重连概率")
+    p.add_argument("--data-mode", choices=["processed", "raw", "synthetic"],
+                   default="processed",
+                   help="数据模式: processed=预处理聚合CSV(快), raw=原始CSV(慢), synthetic=合成曲线")
     p.add_argument("--synthetic", action="store_true",
-                   help="使用合成曲线 (不依赖真实数据)")
+                   help="(快捷方式) 等同于 --data-mode synthetic")
     p.add_argument("--workers", type=int, default=1,
                    help="并行 worker 数 (1=串行, 0=CPU 数)")
     p.add_argument("--sweep", action="store_true",
@@ -367,11 +370,20 @@ def main():
         from multiprocessing import cpu_count
         args.workers = cpu_count()
 
+    # --synthetic 快捷方式覆盖 --data-mode
+    data_mode = "synthetic" if args.synthetic else args.data_mode
+
+    _mode_labels = {
+        "processed": "预处理聚合CSV (household/)",
+        "raw": "原始CSV (data-driven LCL+PV)",
+        "synthetic": "合成曲线",
+    }
+
     print("=" * 60)
     print("昼夜稳定性剖面 — κ_c(h) 二分搜索")
     print("=" * 60)
     print(f"  季节       : {args.season}")
-    print(f"  数据源     : {'合成曲线' if args.synthetic else 'data-driven (LCL+PV)'}")
+    print(f"  数据源     : {_mode_labels.get(data_mode, data_mode)}")
     print(f"  网络       : WS(N={N}, K={args.K}, q={args.q})")
     print(f"  Realizations: {args.realizations}")
     print(f"  κ 扫描     : {'是' if args.sweep else '否'}")
@@ -385,7 +397,7 @@ def main():
         season=args.season,
         n_real=args.realizations,
         base_seed=args.base_seed,
-        use_synthetic=args.synthetic,
+        data_mode=data_mode,
         K_bar=args.K,
         q_rewire=args.q,
         n_workers=args.workers,
@@ -405,7 +417,7 @@ def main():
             season=args.season,
             n_real=args.sweep_realizations,
             base_seed=args.base_seed,
-            use_synthetic=args.synthetic,
+            data_mode=data_mode,
             K_bar=args.K,
             q_rewire=args.q,
             n_workers=args.workers,
@@ -424,7 +436,8 @@ def main():
         "q": args.q,
         "I": I_INERTIA,
         "D": D_DAMP,
-        "synthetic": args.synthetic,
+        "data_mode": data_mode,
+        "synthetic": data_mode == "synthetic",
         "kc_search_range": [0.1, 10.0],
         "kc_precision": 0.05,
         "sync_criterion": "||omega||_2 < 0.5 after 500s",

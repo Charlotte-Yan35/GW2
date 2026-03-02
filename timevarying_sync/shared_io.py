@@ -24,6 +24,7 @@ from scipy.interpolate import interp1d
 
 from config import (
     PROJECT_ROOT, LCL_DATA_DIR, LCL_PARQUET, PV_DATA_FILE,
+    PROCESSED_LCL_CSV, PROCESSED_PV_CSV, SEASON_TO_PV_SEASON,
     SEASON_TO_MONTH, N, N_HOUSEHOLDS, PCC_NODE, PV_PENETRATION,
     T_TOTAL,
     LCL_COL_ID, LCL_COL_DATETIME, LCL_COL_POWER,
@@ -264,7 +265,119 @@ def _make_random_day_profile_pv(month, rng, pv_file):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 3. 合成曲线 (fallback)
+# 3. 预处理聚合数据模式 (processed)
+# ═══════════════════════════════════════════════════════════════
+
+# 模块级缓存: CSV 只读一次
+_PROCESSED_LCL_CACHE = None
+_PROCESSED_PV_CACHE = None
+
+
+def _load_processed_lcl():
+    """懒加载预处理 LCL 聚合数据 (monthly_hourly_usage.csv)。
+
+    返回 DataFrame: month, hour, avg_kwh, p10_kwh, p90_kwh
+    """
+    global _PROCESSED_LCL_CACHE
+    if _PROCESSED_LCL_CACHE is not None:
+        return _PROCESSED_LCL_CACHE
+    if not PROCESSED_LCL_CSV.exists():
+        raise FileNotFoundError(
+            f"预处理 LCL 数据未找到: {PROCESSED_LCL_CSV}\n"
+            f"请先运行 household/consumer/ 分析脚本生成该文件。"
+        )
+    df = pd.read_csv(PROCESSED_LCL_CSV)
+    _PROCESSED_LCL_CACHE = df
+    return df
+
+
+def _load_processed_pv():
+    """懒加载预处理 PV 聚合数据 (generation_range_by_season.csv)。
+
+    返回 DataFrame: Hour, {Season}_Mean, {Season}_P25, {Season}_P75
+    """
+    global _PROCESSED_PV_CACHE
+    if _PROCESSED_PV_CACHE is not None:
+        return _PROCESSED_PV_CACHE
+    if not PROCESSED_PV_CSV.exists():
+        raise FileNotFoundError(
+            f"预处理 PV 数据未找到: {PROCESSED_PV_CSV}\n"
+            f"请先运行 household/generation/ 分析脚本生成该文件。"
+        )
+    df = pd.read_csv(PROCESSED_PV_CSV)
+    _PROCESSED_PV_CACHE = df
+    return df
+
+
+def _make_processed_demand_profile(month, rng):
+    """从预处理 LCL 聚合数据构建单户日负荷曲线。
+
+    采样策略: α ~ Uniform(0,1) 在 P10-P90 区间内采样整体水平，
+    再加 ±5% 逐小时噪声。
+    """
+    df = _load_processed_lcl()
+    month_data = df[df["month"] == month].sort_values("hour")
+    if len(month_data) < 24:
+        raise RuntimeError(f"预处理 LCL 数据中月份 {month} 数据不足 24 小时")
+
+    hours = month_data["hour"].values.astype(float)
+    p10 = month_data["p10_kwh"].values.astype(float)
+    p90 = month_data["p90_kwh"].values.astype(float)
+
+    # α ∈ [0,1] 确定该节点在 P10-P90 区间内的整体水平
+    alpha = rng.random()
+    profile = p10 + alpha * (p90 - p10)
+
+    # ±5% 逐小时噪声
+    noise = 1.0 + 0.05 * (2.0 * rng.random(len(hours)) - 1.0)
+    profile = np.maximum(0.0, profile * noise)
+
+    secs = hours * 3600.0
+    return secs, profile
+
+
+def _make_processed_pv_profile(season, rng):
+    """从预处理 PV 聚合数据构建单户日发电曲线。
+
+    采样策略: α ~ Uniform(0,1) 在 P25-P75 区间内采样整体水平，
+    再加 ±5% 逐小时噪声。
+    """
+    df = _load_processed_pv()
+    pv_season = SEASON_TO_PV_SEASON.get(season)
+    if pv_season is None:
+        raise ValueError(f"未知季节 '{season}', 可用: {list(SEASON_TO_PV_SEASON.keys())}")
+
+    hours = df["Hour"].values.astype(float)
+    p25_col = f"{pv_season}_P25"
+    p75_col = f"{pv_season}_P75"
+    if p25_col not in df.columns or p75_col not in df.columns:
+        raise KeyError(f"PV CSV 中未找到列 {p25_col}/{p75_col}, 可用: {list(df.columns)}")
+
+    p25 = df[p25_col].values.astype(float)
+    p75 = df[p75_col].values.astype(float)
+
+    alpha = rng.random()
+    profile = p25 + alpha * (p75 - p25)
+
+    noise = 1.0 + 0.05 * (2.0 * rng.random(len(hours)) - 1.0)
+    profile = np.maximum(0.0, profile * noise)
+
+    secs = hours * 3600.0
+    return secs, profile
+
+
+def _build_processed(season, rng):
+    """用预处理聚合数据构建所有节点的日曲线。"""
+    month = SEASON_TO_MONTH[season]
+    demand_profiles = [_make_processed_demand_profile(month, rng)
+                       for _ in range(N_HOUSEHOLDS)]
+    gen_profiles = [_make_processed_pv_profile(season, rng)
+                    for _ in range(PV_PENETRATION)]
+    return {"demand_profiles": demand_profiles, "gen_profiles": gen_profiles}
+
+
+# ═══════════════════════════════════════════════════════════════
+# 4. 合成曲线 (fallback)
 # ═══════════════════════════════════════════════════════════════
 
 def _synthetic_demand_24h(rng):
@@ -296,35 +409,59 @@ def _synthetic_pv_24h(season, rng):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 4. 公开接口
+# 5. 公开接口
 # ═══════════════════════════════════════════════════════════════
 
-def build_daily_profiles_for_realization(season, rng, use_synthetic=False):
+def build_daily_profiles_for_realization(season, rng,
+                                         use_synthetic=False,
+                                         data_mode=None):
     """为一次 realization 构建所有节点的 24h 负荷 / 发电曲线。
 
     Parameters
     ----------
     season : str  "summer" | "winter"
     rng : np.random.Generator
-    use_synthetic : bool  强制使用合成曲线
+    use_synthetic : bool  (向后兼容) 强制使用合成曲线
+    data_mode : str | None
+        "processed" — 使用预处理聚合 CSV (默认, 快速)
+        "raw"       — 使用原始 LCL/PV CSV (慢, 高保真)
+        "synthetic" — 合成曲线 (无文件依赖)
+        None        — 由 use_synthetic 决定: True→synthetic, False→processed
 
     Returns
     -------
     dict  demand_profiles: list[(secs, vals)] × N_HOUSEHOLDS
           gen_profiles   : list[(secs, vals)] × PV_PENETRATION
     """
-    if use_synthetic:
+    # 向后兼容: 旧的 use_synthetic 参数映射
+    if data_mode is None:
+        data_mode = "synthetic" if use_synthetic else "processed"
+
+    if data_mode == "synthetic":
         return _build_synthetic(season, rng)
 
-    try:
-        config = locate_reference_data_config()
-        return _build_datadriven(season, rng, config)
-    except (FileNotFoundError, RuntimeError) as exc:
-        warnings.warn(
-            f"无法加载真实数据 ({exc}), 回退到合成曲线模式",
-            RuntimeWarning, stacklevel=2,
-        )
-        return _build_synthetic(season, rng)
+    if data_mode == "processed":
+        try:
+            return _build_processed(season, rng)
+        except (FileNotFoundError, RuntimeError, KeyError) as exc:
+            warnings.warn(
+                f"无法加载预处理数据 ({exc}), 回退到合成曲线模式",
+                RuntimeWarning, stacklevel=2,
+            )
+            return _build_synthetic(season, rng)
+
+    if data_mode == "raw":
+        try:
+            config = locate_reference_data_config()
+            return _build_datadriven(season, rng, config)
+        except (FileNotFoundError, RuntimeError) as exc:
+            warnings.warn(
+                f"无法加载原始数据 ({exc}), 回退到合成曲线模式",
+                RuntimeWarning, stacklevel=2,
+            )
+            return _build_synthetic(season, rng)
+
+    raise ValueError(f"未知 data_mode='{data_mode}', 可选: processed/raw/synthetic")
 
 
 def _build_datadriven(season, rng, config):

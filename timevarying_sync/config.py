@@ -28,6 +28,13 @@ PV_DATA_FILE = (
     / "EXPORT HourlyData - Customer Endpoints.csv"
 )
 
+# ── 预处理聚合数据路径 (household/ 模块输出) ──
+PROCESSED_LCL_CSV = PROJECT_ROOT / "household" / "consumer" / "output" / "monthly_hourly_usage.csv"
+PROCESSED_PV_CSV = PROJECT_ROOT / "household" / "generation" / "output" / "generation_range_by_season.csv"
+
+# ── 季节 → PV 季节名映射 ──
+SEASON_TO_PV_SEASON = {"summer": "Summer", "winter": "Winter"}
+
 # ═══════════════════════════════════════════════════════════════
 # 季节 → 月份 (对齐 reference_code: month=1 冬, month=7 夏)
 # ═══════════════════════════════════════════════════════════════
