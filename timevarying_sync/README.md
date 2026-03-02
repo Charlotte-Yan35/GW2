@@ -128,7 +128,7 @@ $$r(t) = \left| \frac{1}{N} \sum_{k=1}^{N} e^{i\theta_k(t)} \right|$$
 $$\frac{d\omega_i}{dt} = \frac{P_i(t) - D\omega_i - \kappa \sum_j A_{ij} \sin(\theta_i - \theta_j)}{I}$$
 $$\frac{d\theta_i}{dt} = \omega_i$$
 
-参数: I=1.0, D=1.0, κ=1.0 (可通过 `--kappa` 修改)
+参数: I=1.0, D=1.0, κ=5.0 (可通过 `--kappa` 修改)
 
 ## 可复现性
 

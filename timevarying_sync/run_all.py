@@ -19,7 +19,7 @@ FREQ = "5min"            # 数据频率: "5min", "30min" 等
 REALIZATIONS = 50        # Monte Carlo 次数
 BASE_SEED = 42           # 随机种子 (可复现)
 SYNTHETIC = True         # True=合成曲线, False=真实数据(需要 data/ 目录)
-KAPPA = 1.0              # 耦合强度 κ
+KAPPA = 5.0              # 耦合强度 κ
 K = 4                    # WS 平均度
 Q = 0.1                  # WS 重连概率
 
