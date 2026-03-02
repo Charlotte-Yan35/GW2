@@ -46,7 +46,6 @@ LINE_STYLES = [
     (4, 1.0,  "#2ca02c", "-",  2.2, "D",  5),   # 绿 菱
     (8, 0.0,  "#e8850c", "--", 2.5, "^",  6),   # 橙 上三角
     (8, 0.15, "#9467bd", "--", 2.2, "v",  5),   # 紫 下三角
-    (8, 0.5,  "#ff7f0e", "--", 2.2, "X",  6),   # 亮橙 X
     (8, 1.0,  "#17becf", "--", 2.2, "P",  6),   # 青 十字
 ]
 
@@ -58,6 +57,15 @@ NP_SECTIONS = [
 ]
 
 _DPI = 300
+
+plt.rcParams.update({
+    "font.size": 16,
+    "axes.titlesize": 17,
+    "axes.labelsize": 16,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "legend.fontsize": 13,
+})
 
 
 # ====================================================================
@@ -89,12 +97,12 @@ def draw_simplex_frame(ax, total=N_TOTAL):
 
     # 边标签
     mx, my = 0.5 * (0 + 0.5), 0.5 * (0 + H_TRI)
-    ax.text(mx - 0.08, my, r"$\leftarrow$ Generators", fontsize=9,
+    ax.text(mx - 0.08, my, r"$\leftarrow$ Generators", fontsize=15,
             ha='center', va='center', rotation=60)
-    ax.text(0.5, -0.07, r"Consumers $\rightarrow$", fontsize=9,
+    ax.text(0.5, -0.07, r"Consumers $\rightarrow$", fontsize=15,
             ha='center', va='top')
     mx, my = 0.5 * (1 + 0.5), 0.5 * (0 + H_TRI)
-    ax.text(mx + 0.08, my, r"$\leftarrow$ Passive", fontsize=9,
+    ax.text(mx + 0.08, my, r"$\leftarrow$ Passive", fontsize=15,
             ha='center', va='center', rotation=-60)
 
     ax.set_xlim(-0.06, 1.06)
@@ -135,8 +143,8 @@ def plot_panel_a(ax):
         triang = mtri.Triangulation(xs, ys)
         tcf = ax.tricontourf(triang, vals, levels=20, cmap='YlGnBu_r')
         cb = plt.colorbar(tcf, ax=ax, shrink=0.7, pad=0.02)
-        cb.set_label(r'$\overline{\kappa}_c$', fontsize=10)
-        cb.ax.tick_params(labelsize=8)
+        cb.set_label(r'$\overline{\kappa}_c$', fontsize=16)
+        cb.ax.tick_params(labelsize=13)
 
     # 标注三条截面线
     section_colors = ["#d62728", "#9467bd", "#17becf"]
@@ -152,11 +160,11 @@ def plot_panel_a(ax):
         # 标注在线段正中间，白底衬托
         xm = 0.5 * (x0 + x1)
         ym = 0.5 * (y0 + y1)
-        ax.text(xm, ym, f"$n_p$={np_val}", fontsize=10, color=section_colors[i],
+        ax.text(xm, ym, f"$n_p$={np_val}", fontsize=14, color=section_colors[i],
                 ha='center', va='center', fontweight='bold',
                 bbox=dict(fc='white', ec='none', alpha=0.8, pad=1.5))
 
-    ax.set_title("K=4, q=0 (baseline)", fontsize=11, pad=8)
+    ax.set_title("K=4, q=0 (baseline)", fontsize=17, pad=8)
 
 
 # ====================================================================
@@ -201,13 +209,13 @@ def plot_section_panel(ax, df, np_val, pct_str, show_legend=False):
     ax.spines['right'].set_visible(False)
     ax.grid(True, alpha=0.3, lw=0.5)
 
-    ax.set_xlabel("Consumers ($n_c$)", fontsize=10)
-    ax.set_ylabel(r"$\overline{\kappa}_c$", fontsize=11, rotation=0, labelpad=20)
-    ax.set_title(f"$n_p$={np_val} ({pct_str} passive)", fontsize=11, pad=8)
-    ax.tick_params(labelsize=9)
+    ax.set_xlabel("Consumers ($n_c$)", fontsize=16)
+    ax.set_ylabel(r"$\overline{\kappa}_c$", fontsize=17, rotation=0, labelpad=24)
+    ax.set_title(f"$n_p$={np_val} ({pct_str} passive)", fontsize=17, pad=8)
+    ax.tick_params(labelsize=14)
 
     if show_legend:
-        ax.legend(fontsize=8, loc='upper left', framealpha=0.9, ncol=2)
+        return ax.get_legend_handles_labels()
 
 
 # ====================================================================
@@ -216,33 +224,43 @@ def plot_section_panel(ax, df, np_val, pct_str, show_legend=False):
 
 def main():
     print("=" * 60)
-    print("Passive 节点对稳定性影响 — 2×2 面板")
+    print("Passive 节点对稳定性影响 — 1×4 面板")
     print("=" * 60)
 
     df = load_agg_csv()
     print(f"加载 {len(df)} 行数据")
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    fig = plt.figure(figsize=(22, 4.5))
+    gs = fig.add_gridspec(1, 4, width_ratios=[1.3, 1, 1, 1],
+                          left=0.04, right=0.98, top=0.92, bottom=0.14,
+                          wspace=0.30)
+    axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
 
     # Panel A: simplex heatmap
     print("绘制 Panel A: simplex heatmap ...")
-    plot_panel_a(axes[0, 0])
-    axes[0, 0].text(-0.05, 1.05, "A", transform=axes[0, 0].transAxes,
-                    fontsize=14, fontweight='bold', va='top')
+    plot_panel_a(axes[0])
+    axes[0].text(-0.08, 1.12, "A", transform=axes[0].transAxes,
+                 fontsize=18, fontweight='bold', va='top', ha='left')
 
     # Panels B-D: 截面线图
-    panel_axes = [axes[0, 1], axes[1, 0], axes[1, 1]]
+    panel_axes = [axes[1], axes[2], axes[3]]
     panel_labels = ["B", "C", "D"]
+    legend_info = None
     for i, (np_val, pct_str) in enumerate(NP_SECTIONS):
         print(f"绘制 Panel {panel_labels[i]}: np={np_val} ({pct_str}) ...")
-        plot_section_panel(panel_axes[i], df, np_val, pct_str,
-                           show_legend=(i == 0))
-        panel_axes[i].text(-0.05, 1.05, panel_labels[i],
+        result = plot_section_panel(panel_axes[i], df, np_val, pct_str,
+                                    show_legend=(i == 0))
+        if result is not None:
+            legend_info = result
+        panel_axes[i].text(-0.12, 1.12, panel_labels[i],
                            transform=panel_axes[i].transAxes,
-                           fontsize=14, fontweight='bold', va='top')
+                           fontsize=18, fontweight='bold', va='top', ha='left')
 
-    fig.subplots_adjust(left=0.08, right=0.96, top=0.96, bottom=0.06,
-                        wspace=0.30, hspace=0.30)
+    # 将 legend 放到 Panel A 下方
+    if legend_info:
+        handles, labels = legend_info
+        axes[0].legend(handles, labels, fontsize=13, loc='upper center',
+                       bbox_to_anchor=(0.5, -0.05), ncol=2, framealpha=0.9)
 
     out_path = RESULTS_DIR / "fig_passive_impact.png"
     fig.savefig(out_path, dpi=_DPI, bbox_inches='tight')

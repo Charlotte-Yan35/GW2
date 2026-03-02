@@ -27,8 +27,10 @@ GW2/
 │   ├── results/                  # 输出图片与摘要报告
 │   └── output/                   # 额外输出图片
 ├── Q1Topology/             # Q1 作业：Watts-Strogatz 网络分析
+│   ├── ws_kappa_c/                # 临界耦合 κ_c vs 重连概率 q 与平均度 k
+│   └── ws_percolation/            # 网络渗流分析
 ├── data/                   # 原始数据（LCL / PV / 天气 / 电价）
-├── docs/                   # 文档与参考资料
+├── docs/                   # 文档与参考资料（含参考论文 PDF）
 ├── reference_code/         # 参考代码（教师原始 Julia/Python 实现）
 └── README.md
 ```
@@ -68,9 +70,11 @@ pip install numpy scipy pandas matplotlib seaborn networkx tqdm pyarrow
 仓库内已包含主要数据目录：`data/`。
 
 关键输入包括：
-1. `data/Small LCL Data/LCL-June2015v2_*.csv` — 伦敦 ~5500 户半小时用电数据
-2. `data/PV Data/` — 光伏发电逐小时数据
-3. `data/Small_LCL_Data.parquet`（可由脚本生成）
+1. `data/Small LCL Data/LCL-June2015v2_*.csv` — 伦敦 ~5500 户半小时用电数据（168 个 CSV 文件）
+2. `data/PV Data/` — 光伏发电逐小时数据（9 个子目录）
+3. `data/Small_LCL_Data.parquet`（~605 MB，可由脚本生成）
+4. `data/Weather Data 2014-11-30.xlsx` — 天气数据
+5. `data/Tariffs.xlsx` — 电价数据
 
 如果缺少 Parquet 文件，可先执行：
 
@@ -162,7 +166,7 @@ python household/node/household_microgrid.py
 |------|------|
 | `compute.py` | 核心计算：κ_c 二分搜索、DC 潮流、Lorenz 曲线与 Gini 系数 |
 | `plots.py` | 绘图：κ_c(q) 曲线、κ_c(K,q) 热力图、Lorenz 曲线、Gini 系数 |
-| `plots_combined.py` | 多配比对比图（balanced / gen_heavy / load_heavy 叠加） |
+| `plots_combined.py` | 多配比对比图（balanced / gen_heavy / load_heavy 叠加对比） |
 
 **swing_cascade/** — 级联故障分析：
 
@@ -251,9 +255,9 @@ python Topology2.0/cascade_resilience/plots_recovery_panels.py
 | `plot_simplex_panels.py` | 2×3 三元热力图面板（α* 分布 + 失效模式区域） |
 | `plot_stability_panels.py` | 稳定性三元热力图面板（κ_c 分布） |
 | `plot_stability_extra.py` | 补充稳定性图表（κ_c 额外面板） |
-| `plot_passive_impact.py` | 被动节点占比对 κ_c 的影响分析图 |
+| `plot_passive_impact.py` | 被动节点占比对 κ_c 的影响分析图（含趋势线与边际效应） |
 | `generate_summary.py` | 生成结构化文本摘要报告 |
-| `shared_utils.py` | 共享工具函数（网络构建、摇摆方程求解等） |
+| `shared_utils.py` | 共享工具函数（WS 网络构建、摇摆方程求解、级联故障模拟等） |
 
 ```bash
 # 级联韧性扫描
@@ -278,8 +282,31 @@ python ratio_scan/generate_summary.py
 
 ### 6) Q1 作业（`Q1Topology/`）
 
-- `ws_kappa_c/` — 临界耦合 $\kappa_c$ vs 重连概率 $q$ 与平均度 $k$
-- `ws_percolation/` — 网络渗流分析
+研究 Watts-Strogatz 网络的基础特性。
+
+**ws_kappa_c/** — 临界耦合分析：
+
+| 脚本 | 说明 |
+|------|------|
+| `ws_kappa_c.py` | 临界耦合 $\kappa_c$ vs 重连概率 $q$ 与平均度 $k$ 的二分搜索计算 |
+| `ws_kappa_c_heatmap.py` | $\kappa_c(K, q)$ 热力图可视化 |
+
+**ws_percolation/** — 网络渗流分析：
+
+| 脚本 | 说明 |
+|------|------|
+| `ws_percolation.py` | WS 网络渗流计算 |
+| `ws_figure.py` | 渗流结果可视化 |
+
+```bash
+python Q1Topology/ws_kappa_c/ws_kappa_c.py
+python Q1Topology/ws_kappa_c/ws_kappa_c_heatmap.py
+python Q1Topology/ws_percolation/ws_percolation.py
+python Q1Topology/ws_percolation/ws_figure.py
+```
+
+输出：`Q1Topology/ws_kappa_c/output/`、`Q1Topology/ws_percolation/output/`
+缓存：`Q1Topology/ws_kappa_c/cache/`、`Q1Topology/ws_percolation/cache/`（**请勿删除**）
 
 ## 已有结果
 
@@ -295,6 +322,23 @@ python ratio_scan/generate_summary.py
 | 三元单纯形 | `Topology2.0/experiment_ratio_simplex/figures/` |
 | 级联韧性 | `Topology2.0/cascade_resilience/output/` |
 | 节点配比扫描 | `ratio_scan/results/` |
+| Q1 临界耦合 | `Q1Topology/ws_kappa_c/output/` |
+| Q1 渗流分析 | `Q1Topology/ws_percolation/output/` |
+
+## 缓存说明
+
+以下缓存目录包含计算成本极高的结果（数小时到数天），**请勿删除**：
+
+| 缓存目录 | 格式 | 说明 |
+|----------|------|------|
+| `reproduction/cache/` | `.npz` | 论文复现计算结果（含 figS2 子目录） |
+| `Topology2.0/ws_topology_effects/ws_stability/cache/` | `.pkl` | 稳定性扫描结果 |
+| `Topology2.0/ws_topology_effects/swing_cascade/cache/` | `.npz` | 级联故障扫描结果 |
+| `Topology2.0/experiment_ratio_simplex/cache/` | `.csv` + `.json` | 三元单纯形扫描结果 |
+| `Topology2.0/cascade_resilience/cache/` | `.npz` | 3D 参数扫描结果（226 个文件） |
+| `ratio_scan/cache/` | `.csv` | 配比扫描结果 |
+| `Q1Topology/ws_kappa_c/cache/` | `.npz` | κ_c 计算缓存 |
+| `Q1Topology/ws_percolation/cache/` | `.npz` | 渗流计算缓存 |
 
 ## 说明
 
@@ -302,3 +346,4 @@ python ratio_scan/generate_summary.py
 2. 多数脚本会自动创建 `output/` 与 `cache/` 目录。
 3. 文档说明参考 `docs/markdown/` 与 `2nodes/两节点稳定性分析使用指南.md`。
 4. `reference_code/GridResilience/` 包含教师原始 Julia 实现，供对照参考。
+5. 所有绘图脚本建议使用 `MPLBACKEND=Agg` 运行，避免 GUI 弹窗。
