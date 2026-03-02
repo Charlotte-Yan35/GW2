@@ -9,18 +9,26 @@
 ```text
 GW2/
 ├── reproduction/           # 论文图表复现（Figure 1–6, S2）
+│   ├── cache/                    # 计算缓存 (.npz)，请勿删除
+│   └── output/                   # 输出图片
 ├── 2nodes/                 # 两节点模型：分岔图、相图、稳定性分析
 ├── household/              # 家庭用电 / 光伏发电 / 单节点微电网
+│   ├── consumer/                 # LCL 用电统计分析
+│   ├── generation/               # 光伏发电分析
+│   └── node/                     # 家庭微电网模型（含储能）
 ├── Topology2.0/            # 拓扑与韧性扩展实验
-│   ├── ws_topology_effects/      # WS 拓扑效应 (κ_c、Gini、级联二分)
+│   ├── ws_topology_effects/      # WS 拓扑效应（模块化重构）
+│   │   ├── ws_stability/               # κ_c 映射、Lorenz/Gini 分析
+│   │   └── swing_cascade/              # 级联故障二分搜索、级联持续时间
 │   ├── experiment_ratio_simplex/ # 三元单纯形 × 4 种拓扑族
 │   └── cascade_resilience/       # 级联恢复时间与服务水平分析
-├── ratio_scan/             # 节点配比扫描：α* 三元热力图、失效模式分析
+├── ratio_scan/             # 节点配比扫描与稳定性分析
 │   ├── cache/                    # 扫描结果缓存
-│   └── results/                  # 输出图片与摘要报告
+│   ├── results/                  # 输出图片与摘要报告
+│   └── output/                   # 额外输出图片
 ├── Q1Topology/             # Q1 作业：Watts-Strogatz 网络分析
-├── data/                   # 原始数据（LCL / PV / xlsx 等）
-├── docs/                   # 文档与复现说明
+├── data/                   # 原始数据（LCL / PV / 天气 / 电价）
+├── docs/                   # 文档与参考资料
 ├── reference_code/         # 参考代码（教师原始 Julia/Python 实现）
 └── README.md
 ```
@@ -46,7 +54,7 @@ $$\frac{d\theta_i}{dt} = \omega_i$$
 
 ## 环境依赖
 
-建议 Python 3.10+。
+建议 Python 3.13+（开发环境使用 Python 3.13）。
 
 ```bash
 python -m venv .venv
@@ -146,18 +154,31 @@ python household/node/household_microgrid.py
 
 #### 4a) WS 拓扑效应（`ws_topology_effects/`）
 
-研究 Watts-Strogatz 网络的重连概率 $q$ 与平均度 $K$ 如何影响电网稳定性。
+研究 Watts-Strogatz 网络的重连概率 $q$ 与平均度 $K$ 如何影响电网稳定性。已模块化重构为两个子模块：
+
+**ws_stability/** — 稳定性分析：
+
+| 脚本 | 说明 |
+|------|------|
+| `compute.py` | 核心计算：κ_c 二分搜索、DC 潮流、Lorenz 曲线与 Gini 系数 |
+| `plots.py` | 绘图：κ_c(q) 曲线、κ_c(K,q) 热力图、Lorenz 曲线、Gini 系数 |
+| `plots_combined.py` | 多配比对比图（balanced / gen_heavy / load_heavy 叠加） |
+
+**swing_cascade/** — 级联故障分析：
+
+| 脚本 | 说明 |
+|------|------|
+| `compute.py` | 基于摇摆方程的级联故障二分搜索（α_critical） |
+| `plots.py` | 级联热力图与线图（相对负载 ρ） |
+
+**顶层脚本：**
 
 | 脚本 | 说明 |
 |------|------|
 | `ws_config.py` | 全局参数配置（50 节点，K∈{4,6,8,10,12}，q∈[0,1]，3 种发电/负荷配比） |
-| `ws_compute.py` | 核心计算：κ_c 二分搜索、DC 潮流、Lorenz 曲线与 Gini 系数 |
-| `ws_plots.py` | 绘图：κ_c(q) 曲线、κ_c(K,q) 热力图、Lorenz 曲线、Gini 系数 |
-| `ws_cascade_compute.py` | 基于摇摆方程的级联故障二分搜索（α_critical） |
-| `ws_cascade_plots.py` | 级联热力图与线图（相对负载 ρ） |
-| `ws_plots_combined.py` | 多配比对比图（balanced / gen_heavy / load_heavy 叠加） |
 | `run_all.py` | 一键运行全部计算与绘图 |
 | `run_cascade_all.py` | 仅运行级联二分计算 |
+| `run_cascade_duration.py` | 运行级联持续时间分析 |
 
 三种发电/负荷配比：
 - **balanced**：24 发电 + 25 负荷
@@ -215,24 +236,45 @@ python Topology2.0/cascade_resilience/plots_recovery_panels.py
 输出：`Topology2.0/cascade_resilience/output/`
 缓存：`Topology2.0/cascade_resilience/cache/`（**请勿删除**）
 
-### 5) 节点配比扫描（`ratio_scan/`）
+### 5) 节点配比扫描与稳定性分析（`ratio_scan/`）
 
-研究节点组成（发电机 $n_g$ / 负荷 $n_c$ / 被动节点 $n_p$）如何影响 WS 网络的级联韧性。对所有配比组合 × 6 种拓扑（K×q）通过二分搜索找到临界过载容忍度 $\alpha^*$，并分析失效模式。
+研究节点组成（发电机 $n_g$ / 负荷 $n_c$ / 被动节点 $n_p$）如何影响 WS 网络的级联韧性与稳定性。包含两大分析：
+
+**级联韧性扫描**：对所有配比组合 × 6 种拓扑（K×q）通过二分搜索找到临界过载容忍度 $\alpha^*$，并分析失效模式。
+
+**稳定性扫描**：扫描配比空间中的临界耦合强度 $\kappa_c$，分析被动节点对稳定性的影响。
 
 | 脚本 | 说明 |
 |------|------|
 | `run_ratio_scan.py` | 多进程并行扫描配比空间，二分搜索 α*，缓存至 CSV |
+| `run_stability_scan.py` | 稳定性扫描：计算各配比下的 κ_c，缓存至 CSV |
 | `plot_simplex_panels.py` | 2×3 三元热力图面板（α* 分布 + 失效模式区域） |
+| `plot_stability_panels.py` | 稳定性三元热力图面板（κ_c 分布） |
+| `plot_stability_extra.py` | 补充稳定性图表（κ_c 额外面板） |
+| `plot_passive_impact.py` | 被动节点占比对 κ_c 的影响分析图 |
 | `generate_summary.py` | 生成结构化文本摘要报告 |
+| `shared_utils.py` | 共享工具函数（网络构建、摇摆方程求解等） |
 
 ```bash
+# 级联韧性扫描
 python ratio_scan/run_ratio_scan.py
 python ratio_scan/plot_simplex_panels.py
+
+# 稳定性扫描
+python ratio_scan/run_stability_scan.py
+python ratio_scan/plot_stability_panels.py
+python ratio_scan/plot_stability_extra.py
+python ratio_scan/plot_passive_impact.py
+
+# 摘要报告
 python ratio_scan/generate_summary.py
 ```
 
-输出：`ratio_scan/results/`（`fig_alpha_star_panels.png`、`fig_failure_mode_panels.png`、`summary.txt`）
-缓存：`ratio_scan/cache/`（**请勿删除**）
+输出：
+- `ratio_scan/results/`（`fig_alpha_star_panels.png`、`fig_failure_mode_panels.png`、`fig_kappa_c_panels.png`、`fig_kappa_c_extra.png`、`fig_passive_impact.png`、`summary.txt`）
+- `ratio_scan/output/`（额外图表）
+
+缓存：`ratio_scan/cache/`（**请勿删除**，含 `raw_results.csv`、`stability_results.csv`、`stability_agg.csv` 等）
 
 ### 6) Q1 作业（`Q1Topology/`）
 
@@ -248,7 +290,8 @@ python ratio_scan/generate_summary.py
 | 论文复现 | `reproduction/output/` (Figure 1–6, S2) |
 | 两节点分析 | `2nodes/output/` |
 | 家庭分析 | `household/*/output/` |
-| WS 拓扑效应 | `Topology2.0/ws_topology_effects/output/` |
+| WS 稳定性分析 | `Topology2.0/ws_topology_effects/ws_stability/output/` |
+| WS 级联故障 | `Topology2.0/ws_topology_effects/swing_cascade/output/` |
 | 三元单纯形 | `Topology2.0/experiment_ratio_simplex/figures/` |
 | 级联韧性 | `Topology2.0/cascade_resilience/output/` |
 | 节点配比扫描 | `ratio_scan/results/` |
