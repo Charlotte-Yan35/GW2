@@ -21,7 +21,8 @@ K_ref = 8                            # reference degree for Lorenz / cascade plo
 alpha = 0.2                          # power tolerance for cascade model
 
 # ── Swing cascade parameters ─────────────────────────────────
-KAPPA_CASCADE = 5.0       # 级联计算用的耦合强度 (同论文)
+KAPPA_CASCADE = 1.0       # 级联计算用的耦合强度 (统一与 DurationSweep 一致)
+# KAPPA_CASCADE_OLD = 5.0  # 原始值 (同论文), 旧缓存基于此值
 I_INERTIA = 1.0           # 惯量
 D_DAMP = 1.0              # 阻尼
 SYNCTOL = 3.0             # 失同步容限
