@@ -28,6 +28,7 @@ from ws_config import (
     KAPPA_CASCADE, I_INERTIA, D_DAMP, SYNCTOL, BISECT_TOL,
     DurationSweepConfig, DURATION_SWEEP_PANELS,
     S2_ALPHA_MIN, S2_ALPHA_MAX, S2_ALPHA_RES, S2_ENSEMBLE_SIZE, S2_SEED,
+    stable_seed,
 )
 
 # ── 本模块的 cache / output 目录 ──
@@ -414,7 +415,7 @@ def compute_cascade_bisection(ratio_name):
 
     for ki, K in enumerate(K_list):
         for qi, q_val in enumerate(q_list):
-            base_seed = (hash((ratio_name, K, qi)) % (2**31))
+            base_seed = stable_seed(ratio_name, K, qi)
 
             # 生成 ensemble
             ensemble = _prepare_ensemble(ratio_name, K, q_val, realizations, base_seed)
@@ -677,7 +678,7 @@ def compute_cascade_duration(ratio_name):
         q = pt["q"]
         label = pt["label"]
 
-        base_seed = hash((ratio_name, "duration", K, int(q * 1000))) % (2**31)
+        base_seed = stable_seed(ratio_name, "duration", K, int(q * 1000))
         ensemble = _prepare_ensemble(ratio_name, K, q,
                                      DURATION_REALIZATIONS, base_seed)
 
@@ -994,7 +995,7 @@ def compute_s2_curve(ratio_name, config, value, alpha_values, ensemble_size, see
     kappa = config.kappa
     d_damp = config.gamma  # gamma 即阻尼系数
 
-    base_seed = hash((ratio_name, config.panel, _fmt_value(value), seed)) % (2**31)
+    base_seed = stable_seed(ratio_name, config.panel, _fmt_value(value), seed)
     ensemble = _prepare_ensemble_parameterized(
         ratio_name, K_val, q_val, ensemble_size, base_seed, kappa, d_damp
     )
@@ -1081,7 +1082,7 @@ if __name__ == "__main__":
 
     # 单点测试：K=8, q=0.5
     print("\n--- Single point test: K=8, q=0.5 ---")
-    base_seed = hash((ratio, 8, 10)) % (2**31)
+    base_seed = stable_seed(ratio, 8, 10)
     ensemble = _prepare_ensemble(ratio, 8, 0.5, realizations, base_seed)
     print(f"  Ensemble size: {len(ensemble)}")
 
