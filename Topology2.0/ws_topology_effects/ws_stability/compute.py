@@ -18,6 +18,7 @@ import pickle
 import numpy as np
 import networkx as nx
 from scipy.integrate import solve_ivp
+from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 
 from ws_config import (
@@ -169,50 +170,216 @@ def _find_kappa_c(A: np.ndarray, P: np.ndarray, n: int,
             return kappa_old
 
 
-def compute_kappa_c_map(ratio_name: str):
-    """Compute critical coupling κ_c for each (K, q) pair.
+def _find_kappa_c_lower(A: np.ndarray, P: np.ndarray, n: int,
+                         tol: float = 1e-3) -> tuple:
+    """自下而上搜索下临界耦合 κ_c^low（最小同步耦合）。
 
-    For every (K, q) combination, generate *realizations* WS networks,
-    solve the swing equation, and find κ_c via bisection.
+    Phase 1 - Bracket: κ 从 0.005 开始翻倍，直到找到第一个稳定点。
+    Phase 2 - Bisection: 在 [κ_fail, κ_ok] 间二分收敛。
 
     Returns
     -------
-    kappa_c_mean : ndarray, shape (len(K_list), len(q_list))
-    kappa_c_std  : ndarray, shape (len(K_list), len(q_list))
+    (kappa_c_low, y_stable) : (float, ndarray or None)
+        κ_c^low 和对应的稳态解（用于 warm-start upper search）。
+        如果始终不收敛则返回 (NaN, None)。
+    """
+    kappa_max_bracket = 30.0
+    n_ic_tries = 3  # 每个 κ 尝试多个随机 IC
+
+    # Phase 1: Bracket — 指数增长找到第一个稳定点
+    kappa = 0.005
+    kappa_fail = 0.0
+    kappa_ok = None
+    y_ok = None
+
+    while kappa <= kappa_max_bracket:
+        found = False
+        for ic_trial in range(n_ic_tries):
+            y0 = np.random.rand(2 * n) * 0.1  # 小扰动初始条件
+            converged, y_sol = _integrate_swing(A, P, n, kappa, y0, t_max=200.0)
+            if converged:
+                kappa_ok = kappa
+                y_ok = y_sol
+                found = True
+                break
+        if found:
+            break
+        kappa_fail = kappa
+        kappa *= 2.0
+
+    if kappa_ok is None:
+        return np.nan, None
+
+    # 如果第一个试的 κ=0.005 就稳定了，把 kappa_fail 设为 0
+    if kappa_fail == 0.0 and kappa_ok == 0.005:
+        # 再往下试一下
+        converged_low, _ = _integrate_swing(A, P, n, 0.001,
+                                             np.random.rand(2 * n) * 0.1,
+                                             t_max=200.0)
+        if converged_low:
+            # 极低 κ 也能收敛，κ_c^low ≈ 0
+            return 0.001, y_ok
+        kappa_fail = 0.001
+
+    # Phase 2: Bisection — warm-start from κ_ok 的稳态
+    while (kappa_ok - kappa_fail) > tol:
+        kappa_mid = (kappa_fail + kappa_ok) / 2.0
+        converged, y_sol = _integrate_swing(A, P, n, kappa_mid, y_ok, t_max=150.0)
+        if converged:
+            kappa_ok = kappa_mid
+            y_ok = y_sol
+        else:
+            # 也尝试随机 IC
+            converged2, y_sol2 = _integrate_swing(A, P, n, kappa_mid,
+                                                   np.random.rand(2 * n) * 0.1,
+                                                   t_max=200.0)
+            if converged2:
+                kappa_ok = kappa_mid
+                y_ok = y_sol2
+            else:
+                kappa_fail = kappa_mid
+
+    return kappa_ok, y_ok
+
+
+def _find_kappa_c_upper(A: np.ndarray, P: np.ndarray, n: int,
+                         kappa_low: float, y_stable: np.ndarray,
+                         tol: float = 1e-3,
+                         kappa_max: float = 30.0) -> float:
+    """自上而下搜索上临界耦合 κ_c^high（过耦合失稳点）。
+
+    从已知稳定的 kappa_low 出发，逐步增大 κ 直到失败。
+
+    Returns
+    -------
+    float : κ_c^high，如果 κ_max 仍稳定则返回 NaN（无上界）。
+    """
+    # Phase 1: 从稳定点出发，翻倍增大找第一个失败点
+    kappa = max(kappa_low * 2.0, 0.1)
+    kappa_last_ok = kappa_low
+    y_last_ok = y_stable.copy()
+    kappa_first_fail = None
+
+    while kappa <= kappa_max:
+        converged, y_sol = _integrate_swing(A, P, n, kappa, y_last_ok, t_max=150.0)
+        if converged:
+            kappa_last_ok = kappa
+            y_last_ok = y_sol
+            kappa *= 2.0
+        else:
+            kappa_first_fail = kappa
+            break
+
+    if kappa_first_fail is None:
+        # 在 kappa_max 处再确认一次
+        converged, y_sol = _integrate_swing(A, P, n, kappa_max, y_last_ok,
+                                             t_max=200.0)
+        if converged:
+            return np.nan  # 无上界
+        kappa_first_fail = kappa_max
+
+    # Phase 2: Bisection
+    while (kappa_first_fail - kappa_last_ok) > tol:
+        kappa_mid = (kappa_last_ok + kappa_first_fail) / 2.0
+        converged, y_sol = _integrate_swing(A, P, n, kappa_mid, y_last_ok,
+                                             t_max=150.0)
+        if converged:
+            kappa_last_ok = kappa_mid
+            y_last_ok = y_sol
+        else:
+            kappa_first_fail = kappa_mid
+
+    return kappa_first_fail
+
+
+def _compute_single_task(args):
+    """单个 (K, q, realization) 的 κ_c 计算任务（用于多进程并行）。"""
+    ki, K, qi, q, r, ratio_name, base_seed = args
+    seed = base_seed + ki * 10000 + qi * 100 + r
+    np.random.seed(seed)
+
+    G = generate_ws_network(N, K, q, seed=seed)
+    A = nx.to_numpy_array(G)
+    P = build_power_vector(ratio_name, seed=seed + 1)
+
+    kc_low, y_stable = _find_kappa_c_lower(A, P, N)
+
+    kc_high = np.nan
+    if not np.isnan(kc_low) and y_stable is not None:
+        kc_high = _find_kappa_c_upper(A, P, N, kc_low, y_stable)
+
+    return ki, qi, r, kc_low, kc_high
+
+
+def compute_kappa_c_map(ratio_name: str):
+    """Compute critical coupling κ_c for each (K, q) pair.
+
+    使用双向二分搜索：
+    - _find_kappa_c_lower(): 自下而上找最小同步耦合 κ_c^low
+    - _find_kappa_c_upper(): 自上而下找过耦合失稳 κ_c^high
+
+    使用 multiprocessing 并行加速。
+
+    Returns
+    -------
+    kappa_c_low_mean, kappa_c_low_std, kappa_c_high_mean, kappa_c_high_std
+        各为 ndarray, shape (len(K_list), len(q_list))
     """
     nK = len(K_list)
     nQ = len(q_list)
-    kappa_c_mean = np.full((nK, nQ), np.nan)
-    kappa_c_std = np.full((nK, nQ), np.nan)
 
     base_seed = hash(ratio_name) % (2**31)
-    total = nK * nQ
 
-    pbar = tqdm(total=total, desc=f"κ_c map [{ratio_name}]", unit="pt")
+    # 构建所有任务
+    tasks = []
     for ki, K in enumerate(K_list):
         for qi, q in enumerate(q_list):
-            vals = []
             for r in range(realizations):
-                seed = base_seed + ki * 10000 + qi * 100 + r
-                np.random.seed(seed)
+                tasks.append((ki, K, qi, q, r, ratio_name, base_seed))
 
-                G = generate_ws_network(N, K, q, seed=seed)
-                A = nx.to_numpy_array(G)
-                P = build_power_vector(ratio_name, seed=seed + 1)
-                kc = _find_kappa_c(A, P, N)
-                if not np.isnan(kc):
-                    vals.append(kc)
+    total = len(tasks)
+    print(f"  Total tasks: {total} ({nK}K × {nQ}q × {realizations}r)")
 
-            if vals:
-                kappa_c_mean[ki, qi] = np.mean(vals)
-                kappa_c_std[ki, qi] = np.std(vals)
-            pbar.set_postfix(K=K, q=f"{q:.2f}",
-                             kc=f"{kappa_c_mean[ki, qi]:.2f}",
-                             ok=f"{len(vals)}/{realizations}")
-            pbar.update(1)
-    pbar.close()
+    # 并行计算
+    n_workers = max(1, cpu_count() - 1)
+    print(f"  Using {n_workers} workers")
 
-    return kappa_c_mean, kappa_c_std
+    kc_low_all = np.full((nK, nQ, realizations), np.nan)
+    kc_high_all = np.full((nK, nQ, realizations), np.nan)
+
+    with Pool(n_workers) as pool:
+        results = list(tqdm(
+            pool.imap_unordered(_compute_single_task, tasks),
+            total=total,
+            desc=f"κ_c map [{ratio_name}]",
+            unit="task"
+        ))
+
+    for ki, qi, r, kc_low, kc_high in results:
+        kc_low_all[ki, qi, r] = kc_low
+        kc_high_all[ki, qi, r] = kc_high
+
+    # 聚合统计
+    kc_low_mean = np.full((nK, nQ), np.nan)
+    kc_low_std = np.full((nK, nQ), np.nan)
+    kc_high_mean = np.full((nK, nQ), np.nan)
+    kc_high_std = np.full((nK, nQ), np.nan)
+
+    for ki in range(nK):
+        for qi in range(nQ):
+            vals_low = kc_low_all[ki, qi]
+            valid_low = vals_low[~np.isnan(vals_low)]
+            if len(valid_low) > 0:
+                kc_low_mean[ki, qi] = np.mean(valid_low)
+                kc_low_std[ki, qi] = np.std(valid_low)
+
+            vals_high = kc_high_all[ki, qi]
+            valid_high = vals_high[~np.isnan(vals_high)]
+            if len(valid_high) > 0:
+                kc_high_mean[ki, qi] = np.mean(valid_high)
+                kc_high_std[ki, qi] = np.std(valid_high)
+
+    return kc_low_mean, kc_low_std, kc_high_mean, kc_high_std
 
 
 # ====================================================================
@@ -481,48 +648,85 @@ def _save_cache(ratio_name: str, data: dict):
     print(f"  Cache saved → {path}")
 
 
-def compute_all_for_ratio(ratio_name: str) -> None:
+def compute_all_for_ratio(ratio_name: str, force_recompute_kc: bool = False) -> None:
     """Run all computations for a given ratio configuration.
 
-    Results are cached to cache/{ratio_name}.pkl.  If the cache already
-    exists, all computation is skipped and the cached data is returned.
+    Results are cached to cache/{ratio_name}.pkl.
+
+    Parameters
+    ----------
+    force_recompute_kc : bool
+        如果为 True，即使缓存存在也重新计算 κ_c（使用新的双向算法），
+        但保留 Lorenz/Gini/Cascade 等已有结果。
     """
     cached = _load_cache(ratio_name)
-    if cached is not None:
+
+    # 检查是否需要重算 κ_c（缓存中无新 key 或 force）
+    need_kc = (cached is None
+               or "kappa_c_low_map" not in cached
+               or force_recompute_kc)
+
+    if cached is not None and not need_kc:
         print(f"  [cache hit] {_cache_path(ratio_name)}")
         return
 
-    print(f"\n--- Computing κ_c map for '{ratio_name}' ---")
-    kc_mean, kc_std = compute_kappa_c_map(ratio_name)
+    if need_kc:
+        print(f"\n--- Computing κ_c map (bidirectional) for '{ratio_name}' ---")
+        kc_low_mean, kc_low_std, kc_high_mean, kc_high_std = \
+            compute_kappa_c_map(ratio_name)
 
-    # Optimal q* per K (q that minimises κ_c)
-    if K_ref in K_list:
-        q_star_Kref_idx = np.nanargmin(kc_mean[K_list.index(K_ref)])
-        q_star_Kref = q_list[q_star_Kref_idx]
+        # Optimal q* per K (q that minimises κ_c^low)
+        if K_ref in K_list:
+            q_star_Kref_idx = np.nanargmin(kc_low_mean[K_list.index(K_ref)])
+            q_star_Kref = q_list[q_star_Kref_idx]
+        else:
+            q_star_Kref = np.nan
+        print(f"  q* at K_ref={K_ref}: {q_star_Kref:.2f}")
     else:
-        q_star_Kref = np.nan
-    print(f"  q* at K_ref={K_ref}: {q_star_Kref:.2f}")
+        kc_low_mean = cached["kappa_c_low_map"]
+        kc_low_std = cached["kappa_c_low_std"]
+        kc_high_mean = cached["kappa_c_high_map"]
+        kc_high_std = cached["kappa_c_high_std"]
+        q_star_Kref = cached["q_star_Kref"]
 
-    print(f"\n--- Computing Lorenz / Gini for '{ratio_name}' ---")
-    lorenz_gini = compute_lorenz_and_gini(ratio_name)
-
-    print(f"\n--- Computing cascade size for '{ratio_name}' ---")
-    cascade = compute_cascade_size(ratio_name)
-
-    data = {
-        "kappa_c_map": kc_mean,
-        "kappa_c_std": kc_std,
-        "q_star_Kref": q_star_Kref,
-        "lorenz_curves": lorenz_gini["lorenz_curves"],
-        "gini_vs_q": {
-            "q_list": lorenz_gini["q_list"],
-            "gini_mean": lorenz_gini["gini_mean"],
-            "gini_std": lorenz_gini["gini_std"],
-        },
-        "cascade_size_vs_q": {
+    # Lorenz/Gini/Cascade: 用已有缓存或重算
+    if cached is not None and "lorenz_curves" in cached:
+        lorenz_gini_data = {
+            "lorenz_curves": cached["lorenz_curves"],
+            "gini_vs_q": cached["gini_vs_q"],
+        }
+        cascade_data = cached["cascade_size_vs_q"]
+    else:
+        print(f"\n--- Computing Lorenz / Gini for '{ratio_name}' ---")
+        lorenz_gini = compute_lorenz_and_gini(ratio_name)
+        lorenz_gini_data = {
+            "lorenz_curves": lorenz_gini["lorenz_curves"],
+            "gini_vs_q": {
+                "q_list": lorenz_gini["q_list"],
+                "gini_mean": lorenz_gini["gini_mean"],
+                "gini_std": lorenz_gini["gini_std"],
+            },
+        }
+        print(f"\n--- Computing cascade size for '{ratio_name}' ---")
+        cascade = compute_cascade_size(ratio_name)
+        cascade_data = {
             "q_list": cascade["q_list"],
             "cascade_size_mean": cascade["cascade_size_mean"],
             "cascade_size_std": cascade["cascade_size_std"],
-        },
+        }
+
+    data = {
+        # 新算法结果
+        "kappa_c_low_map": kc_low_mean,
+        "kappa_c_low_std": kc_low_std,
+        "kappa_c_high_map": kc_high_mean,
+        "kappa_c_high_std": kc_high_std,
+        # 保留旧 key 名以兼容（指向 low 结果）
+        "kappa_c_map": kc_low_mean,
+        "kappa_c_std": kc_low_std,
+        "q_star_Kref": q_star_Kref,
+        "lorenz_curves": lorenz_gini_data["lorenz_curves"],
+        "gini_vs_q": lorenz_gini_data["gini_vs_q"],
+        "cascade_size_vs_q": cascade_data,
     }
     _save_cache(ratio_name, data)

@@ -59,8 +59,9 @@ _RATIO_COLORS = {
 }
 
 # Line style + marker distinguishes K
-K_PLOT = [6, 8, 10]
+K_PLOT = [4, 6, 8, 10]
 _K_STYLES = {
+    4:  ("-.",  "o"),   # dash-dot, circle
     6:  ("--", "s"),   # dashed, square
     8:  ("-",  "D"),   # solid, diamond
     10: (":",  "^"),   # dotted, triangle
@@ -89,17 +90,14 @@ def plot_combined_kappa_c_map() -> None:
     Q = np.array(q_list)
     ratio_names = list(RATIO_CONFIGS.keys())
 
-    fig, ax = plt.subplots(figsize=(9, 6.5))
+    fig, ax = plt.subplots(figsize=(9, 4.5))
 
-    # Collect q* info for dual-colour marker handling
-    q_stars = {}  # ratio_name -> (q_star, kc_star)
     line_handles = {}  # (ratio_name, K) -> line handle
 
     for ratio_name in ratio_names:
         data = _load_cache(ratio_name)
-        kc_mean = data["kappa_c_map"]
-        kc_std = data["kappa_c_std"]
-        q_star = data["q_star_Kref"]
+        kc_mean = data.get("kappa_c_low_map", data["kappa_c_map"])
+        kc_std = data.get("kappa_c_low_std", data["kappa_c_std"])
         color = _RATIO_COLORS[ratio_name]
         label = _RATIO_LABELS[ratio_name]
 
@@ -119,78 +117,26 @@ def plot_combined_kappa_c_map() -> None:
             ax.fill_between(Q[valid], (mean - std)[valid], (mean + std)[valid],
                             color=color, alpha=0.04)
 
-        # Collect q* for deferred drawing
-        if not np.isnan(q_star) and K_ref in K_list:
-            ki_ref = K_list.index(K_ref)
-            qi_ref = int(np.argmin(np.abs(Q - q_star)))
-            kc_star = kc_mean[ki_ref, qi_ref]
-            if not np.isnan(kc_star):
-                q_stars[ratio_name] = (q_star, kc_star)
-
-    # Draw q* markers, handling overlaps with dual-colour markers
-    drawn = set()
-    for rn, (qs, kcs) in q_stars.items():
-        if rn in drawn:
-            continue
-        # Check for overlapping q* with another ratio
-        overlap_rn = None
-        for other_rn, (oqs, okcs) in q_stars.items():
-            if other_rn != rn and other_rn not in drawn and abs(qs - oqs) < 1e-6:
-                overlap_rn = other_rn
-                break
-
-        if overlap_rn is not None:
-            # Bright vivid gold focal star for shared q*
-            l1 = _RATIO_LABELS[rn]
-            l2 = _RATIO_LABELS[overlap_rn]
-            y_off = kcs + 0.05
-            ax.plot(qs, y_off, marker="*", color="#FFD700",
-                    markersize=12, zorder=6, linestyle="none",
-                    markeredgecolor="#000000", markeredgewidth=1.0)
-            drawn.add(rn)
-            drawn.add(overlap_rn)
-        else:
-            ax.plot(qs, kcs + 0.05, marker="*", color="#FF2222",
-                    markersize=20, zorder=5, linestyle="none",
-                    markeredgecolor="#000000", markeredgewidth=1.0)
-            drawn.add(rn)
-
     ax.set_xlabel("Rewiring probability $q$")
     ax.set_ylabel(r"Critical coupling $\kappa_c$")
     ax.set_xlim(Q[0], Q[-1])
     ax.set_ylim(bottom=0)
 
-    # 4-column grouped legend:
-    # col1=G=C, col2=G>C, col3=G<C, col4=star definitions
-    star_shared = Line2D([0], [0], marker="*", linestyle="none",
-                         color="#FFD700", markeredgecolor="#000000",
-                         markeredgewidth=1.0, markersize=12,
-                         label=r"$q^*$ (G=C & G<C)")
-    star_gen = Line2D([0], [0], marker="*", linestyle="none",
-                      color="#FF2222", markeredgecolor="#000000",
-                      markeredgewidth=1.0, markersize=12,
-                      label=r"$q^*$ (G>C)")
-    blank = Line2D([0], [0], linestyle="none", alpha=0.0, label="")
-
-    # NOTE: Matplotlib fills legend entries column-wise for ncol>1 in this setup.
-    # Use strict column-major ordering to force:
-    # col1=G=C, col2=G>C, col3=G<C, col4=star definitions.
+    # 3-column grouped legend: col1=G=C, col2=G>C, col3=G<C
     ordered_handles = [
-        line_handles[("balanced", 6)], line_handles[("balanced", 8)],
-        line_handles[("balanced", 10)],
-        line_handles[("gen_heavy", 6)], line_handles[("gen_heavy", 8)],
-        line_handles[("gen_heavy", 10)],
-        line_handles[("load_heavy", 6)], line_handles[("load_heavy", 8)],
-        line_handles[("load_heavy", 10)],
-        star_shared, star_gen, blank,
+        line_handles[("balanced", 4)], line_handles[("balanced", 6)],
+        line_handles[("balanced", 8)], line_handles[("balanced", 10)],
+        line_handles[("gen_heavy", 4)], line_handles[("gen_heavy", 6)],
+        line_handles[("gen_heavy", 8)], line_handles[("gen_heavy", 10)],
+        line_handles[("load_heavy", 4)], line_handles[("load_heavy", 6)],
+        line_handles[("load_heavy", 8)], line_handles[("load_heavy", 10)],
     ]
     ordered_labels = [
-        r"G=C  $K=6$", r"G=C  $K=8$", r"G=C  $K=10$",
-        r"G>C  $K=6$", r"G>C  $K=8$", r"G>C  $K=10$",
-        r"G<C  $K=6$", r"G<C  $K=8$", r"G<C  $K=10$",
-        r"$q^*$ (G=C & G<C)", r"$q^*$ (G>C)", "",
+        r"G=C  $K=4$", r"G=C  $K=6$", r"G=C  $K=8$", r"G=C  $K=10$",
+        r"G>C  $K=4$", r"G>C  $K=6$", r"G>C  $K=8$", r"G>C  $K=10$",
+        r"G<C  $K=4$", r"G<C  $K=6$", r"G<C  $K=8$", r"G<C  $K=10$",
     ]
-    ax.legend(ordered_handles, ordered_labels, fontsize=8, ncol=4,
+    ax.legend(ordered_handles, ordered_labels, fontsize=8, ncol=3,
               loc="upper right", framealpha=0.9, columnspacing=1.0,
               handletextpad=0.5)
     fig.tight_layout()
@@ -229,7 +175,8 @@ def plot_combined_kappa_c_heatmap() -> None:
         return interp(pts).reshape(Kf.shape)
 
     # Interpolate all and find shared colour range
-    Z_all = {rn: _interpolate(all_data[rn]["kappa_c_map"]) for rn in ratio_names}
+    Z_all = {rn: _interpolate(all_data[rn].get("kappa_c_low_map",
+                              all_data[rn]["kappa_c_map"])) for rn in ratio_names}
     vmin = min(np.nanmin(z) for z in Z_all.values())
     vmax = max(np.nanmax(z) for z in Z_all.values())
 
@@ -249,17 +196,6 @@ def plot_combined_kappa_c_heatmap() -> None:
         # Grid sample points
         Qg, Kg = np.meshgrid(Q, K)
         ax.scatter(Qg.ravel(), Kg.ravel(), s=8, c="k", alpha=0.3, zorder=3)
-
-        # Mark q* — gold for G=C/G<C, bright red for G>C
-        q_star = all_data[rn]["q_star_Kref"]
-        if not np.isnan(q_star):
-            star_color = "#FF2222" if rn == "gen_heavy" else "#FFD700"
-            ax.plot(q_star, K_ref, marker="*", color=star_color,
-                    markersize=20, zorder=5,
-                    markeredgecolor="k", markeredgewidth=0.8)
-            ax.annotate(rf"$q^*={q_star:.2f}$", (q_star, K_ref),
-                        textcoords="offset points", xytext=(10, 8),
-                        fontsize=8, color=star_color, fontweight="bold")
 
         ax.set_xlabel("Rewiring probability $q$")
         ax.set_title(_RATIO_LABELS[rn], fontsize=_FONT)

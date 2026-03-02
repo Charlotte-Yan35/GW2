@@ -91,8 +91,9 @@ def plot_kappa_c_map(ratio_name: str) -> None:
        → kappa_c_heatmap_{ratio}.png/pdf
     """
     data = _load_cache(ratio_name)
-    kc_mean = data["kappa_c_map"]     # (nK, nQ)
-    kc_std = data["kappa_c_std"]      # (nK, nQ)
+    # 优先使用新的下界结果，fallback 到旧 key
+    kc_mean = data.get("kappa_c_low_map", data["kappa_c_map"])     # (nK, nQ)
+    kc_std = data.get("kappa_c_low_std", data["kappa_c_std"])      # (nK, nQ)
     q_star = data["q_star_Kref"]
 
     Q = np.array(q_list)
@@ -113,19 +114,6 @@ def plot_kappa_c_map(ratio_name: str) -> None:
                 label=f"$K={Kv}$")
         ax.fill_between(Q[valid], (mean - std)[valid], (mean + std)[valid],
                         color=c, alpha=0.15)
-
-    # Mark q* with red star
-    if not np.isnan(q_star) and K_ref in K_list:
-        ki_ref = K_list.index(K_ref)
-        qi_ref = int(np.argmin(np.abs(Q - q_star)))
-        kc_star = kc_mean[ki_ref, qi_ref]
-        if not np.isnan(kc_star):
-            ax.plot(q_star, kc_star + 0.3, marker="*", color="red",
-                    markersize=15, zorder=5)
-            ax.annotate(rf"$q^*={q_star:.2f}$",
-                        (q_star, kc_star + 0.3),
-                        textcoords="offset points", xytext=(10, 5),
-                        fontsize=9, color="red", fontweight="bold")
 
     ax.set_xlabel("Rewiring probability $q$")
     ax.set_ylabel(r"Critical coupling $\overline{\kappa}_c$")
@@ -178,13 +166,6 @@ def plot_kappa_c_map(ratio_name: str) -> None:
     ax2.scatter(Qg[valid_pts], Kg[valid_pts], s=8, c="k", alpha=0.4, zorder=3)
     ax2.scatter(Qg[~valid_pts], Kg[~valid_pts], s=20, c="grey", marker="x",
                 alpha=0.6, zorder=3, label="NaN (no convergence)")
-
-    # Mark q*
-    if not np.isnan(q_star) and K_ref in K_list:
-        ax2.plot(q_star, K_ref, marker="*", color="red", markersize=14, zorder=5)
-        ax2.annotate(rf"$q^*={q_star:.2f}$", (q_star, K_ref),
-                     textcoords="offset points", xytext=(10, 8),
-                     fontsize=9, color="red", fontweight="bold")
 
     ax2.set_xlabel("Rewiring probability $q$")
     ax2.set_ylabel("Degree $k$")
