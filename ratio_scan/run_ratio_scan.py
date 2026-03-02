@@ -67,7 +67,7 @@ ROLE_SEEDS = 10
 DYN_SEEDS = 10
 
 RATIO_STEP = 5        # simplex step = 1/RATIO_STEP = 0.2
-KAPPA = 5.0
+KAPPA = 1.0
 SYNCTOL = 3.0
 PMAX = 1.0
 I_INERTIA = 1.0
