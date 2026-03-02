@@ -2,16 +2,9 @@
 ws_config.py — Global parameters for WS topology effects study.
 """
 
-import hashlib
 import numpy as np
 from pathlib import Path
 from dataclasses import dataclass
-
-
-def stable_seed(*args) -> int:
-    """确定性种子生成：用 SHA-256 替代 Python hash()，跨会话可复现。"""
-    s = hashlib.sha256(str(args).encode()).hexdigest()
-    return int(s[:8], 16) % (2**31)
 
 # ── Network topology ──────────────────────────────────────────────
 N = 50                  # total number of nodes (PCC + households)

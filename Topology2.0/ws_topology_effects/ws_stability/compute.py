@@ -26,7 +26,6 @@ from ws_config import (
     K_list, q_list, gamma, kappa_grid, realizations,
     K_ref, alpha,
     RATIO_CONFIGS,
-    stable_seed,
 )
 
 # ── 本模块的 cache / output 目录 ──
@@ -329,7 +328,7 @@ def compute_kappa_c_map(ratio_name: str):
     nK = len(K_list)
     nQ = len(q_list)
 
-    base_seed = stable_seed(ratio_name, "kappa_c")
+    base_seed = hash(ratio_name) % (2**31)
 
     # 构建所有任务
     tasks = []
@@ -486,7 +485,7 @@ def compute_lorenz_and_gini(ratio_name: str) -> dict:
     gini_std = np.zeros(nQ)
     lorenz_curves = []
 
-    base_seed = stable_seed(ratio_name, "lorenz")
+    base_seed = (hash(ratio_name) + 7777) % (2**31)
 
     for qi, q in tqdm(list(enumerate(q_list)),
                       desc=f"Lorenz/Gini [{ratio_name}]", unit="q"):
@@ -604,7 +603,7 @@ def compute_cascade_size(ratio_name: str) -> dict:
     cascade_mean = np.zeros(nQ)
     cascade_std = np.zeros(nQ)
 
-    base_seed = stable_seed(ratio_name, "cascade")
+    base_seed = (hash(ratio_name) + 99999) % (2**31)
 
     for qi, q in tqdm(list(enumerate(q_list)),
                       desc=f"Cascade [{ratio_name}]", unit="q"):
