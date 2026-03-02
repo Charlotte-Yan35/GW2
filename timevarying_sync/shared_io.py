@@ -123,8 +123,14 @@ def _make_random_day_profile_lcl(month, rng, lcl_files):
     4. 返回 (secs_from_midnight, values) 半小时分辨率
     """
     file_idx = rng.integers(0, len(lcl_files))
-    raw_df = pd.read_csv(lcl_files[file_idx], header=0, encoding="latin-1")
-    data = _strip_to_datevidandpower(raw_df)
+    try:
+        raw_df = pd.read_csv(lcl_files[file_idx], header=0)
+    except UnicodeDecodeError:
+        raw_df = pd.read_csv(lcl_files[file_idx], header=0, encoding="latin-1")
+    try:
+        data = _strip_to_datevidandpower(raw_df)
+    except (KeyError, ValueError):
+        return None, None, False
 
     # 随机选 household
     house_ids = list(data["LCLid"].dropna().unique())
@@ -194,7 +200,12 @@ def _make_random_day_profile_pv(month, rng, pv_file):
     2. 按月过滤 → DOW 分组 → P_GEN = (P_GEN_MAX + P_GEN_MIN) / 2 取均值
     3. 提取 Tuesday (DOW=1)，与 LCL 一致
     """
-    raw_df = pd.read_csv(pv_file, header=0, encoding="latin-1")
+    try:
+        raw_df = pd.read_csv(pv_file, header=0)
+    except UnicodeDecodeError:
+        raw_df = pd.read_csv(pv_file, header=0, encoding="latin-1")
+    if PV_COL_DATETIME not in raw_df.columns:
+        return None, None, False
     raw_df[PV_COL_DATETIME] = pd.to_datetime(raw_df[PV_COL_DATETIME], errors="coerce")
     for col in [PV_COL_GEN_MAX, PV_COL_GEN_MIN]:
         raw_df[col] = pd.to_numeric(raw_df[col], errors="coerce")
