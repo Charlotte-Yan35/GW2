@@ -116,7 +116,7 @@ def draw_simplex_frame(ax, total=N_TOTAL):
 # ====================================================================
 
 def plot_panel_a(ax):
-    """复现 figure1 Panel C: K=4, q=0 simplex heatmap，并标注三条截面线。"""
+    """复现 figure1 Panel C: K=4, q=0 simplex heatmap，带边缘刻度和截面线标注。"""
     if not REPRO_CACHE.exists():
         print(f"[ERROR] 找不到 Panel C 缓存: {REPRO_CACHE}")
         sys.exit(1)
@@ -125,31 +125,115 @@ def plot_panel_a(ax):
     configs = data["configs"]       # (351, 3): [n_plus, n_minus, n_passive]
     kappa_c_vals = data["kappa_c_vals"]  # (351,)
 
-    draw_simplex_frame(ax)
-
-    # 转换坐标并过滤 NaN
-    xs, ys, vals = [], [], []
+    # ── 构建查找表 ──
+    step = 2
+    kc_lookup = {}
     for idx, (n_plus, n_minus, n_passive) in enumerate(configs):
-        if np.isnan(kappa_c_vals[idx]):
-            continue
+        if not np.isnan(kappa_c_vals[idx]):
+            kc_lookup[(int(n_plus), int(n_minus))] = kappa_c_vals[idx]
+
+    # ── 对 NaN 边界点用最近邻外推，使热力图填充到三角形边缘 ──
+    for n_plus in range(0, N_TOTAL + 1, step):
+        for n_minus in range(0, N_TOTAL + 1 - n_plus, step):
+            if (n_plus, n_minus) in kc_lookup:
+                continue
+            for radius in range(1, 4):
+                candidates = []
+                for dp in range(-radius * step, (radius + 1) * step, step):
+                    for dm in range(-radius * step, (radius + 1) * step, step):
+                        if dp == 0 and dm == 0:
+                            continue
+                        np2, nm2 = n_plus + dp, n_minus + dm
+                        npa2 = N_TOTAL - np2 - nm2
+                        if (np2 >= 0 and nm2 >= 0 and npa2 >= 0
+                                and (np2, nm2) in kc_lookup):
+                            candidates.append(kc_lookup[(np2, nm2)])
+                if candidates:
+                    kc_lookup[(n_plus, n_minus)] = np.mean(candidates)
+                    break
+
+    # ── 转换坐标 ──
+    xs, ys, vals = [], [], []
+    for (n_plus, n_minus), val in kc_lookup.items():
+        n_passive = N_TOTAL - n_plus - n_minus
         x, y = ternary_to_cart(n_plus, n_minus, n_passive)
         xs.append(x)
         ys.append(y)
-        vals.append(kappa_c_vals[idx])
-
+        vals.append(val)
     xs, ys, vals = np.array(xs), np.array(ys), np.array(vals)
 
+    # ── 绘制热力图 ──
     if len(xs) > 3:
         triang = mtri.Triangulation(xs, ys)
+        # 蒙版：去除三角形外部的 Delaunay 三角面
+        cx = xs[triang.triangles].mean(axis=1)
+        cy = ys[triang.triangles].mean(axis=1)
+        eps = 0.01
+        outside = ~((cy >= -eps)
+                     & (cy <= 2 * H_TRI * cx + eps)
+                     & (cy <= 2 * H_TRI * (1 - cx) + eps))
+        triang.set_mask(outside)
+
         tcf = ax.tricontourf(triang, vals, levels=20, cmap='YlGnBu_r')
+
+        # 裁剪到三角形边界
+        clip_tri = plt.Polygon([(0, 0), (1, 0), (0.5, H_TRI)],
+                                transform=ax.transData, closed=True,
+                                facecolor='none', edgecolor='none')
+        ax.add_patch(clip_tri)
+        tcf.set_clip_path(clip_tri)
+
         cb = plt.colorbar(tcf, ax=ax, shrink=0.7, pad=0.02)
         cb.set_label(r'$\overline{\kappa}_c$', fontsize=16)
         cb.ax.tick_params(labelsize=13)
 
-    # 标注三条截面线
+    # ── 三角形边框 ──
+    ax.plot([0, 1, 0.5, 0], [0, 0, H_TRI, 0], 'k-', lw=1.0, zorder=5)
+
+    # ── 边缘刻度 ──
+    tick_vals = [0, 10, 20, 30, 40, 50]
+    tl = 0.02  # 刻度线长度
+
+    # 底边 (Consumers n_c): BL(0) → BR(50)
+    for v in tick_vals:
+        x, y = ternary_to_cart(N_TOTAL - v, v, 0)
+        ax.plot([x, x], [y, y - tl], 'k-', lw=0.8, zorder=5, clip_on=False)
+        ax.text(x, y - tl - 0.005, str(v), fontsize=11,
+                ha='center', va='top')
+
+    # 左边 (Generators n_g): BL(50) → Top(0)
+    # 向外法向量: (-H_TRI, 0.5)
+    nx_l, ny_l = -H_TRI, 0.5
+    for v in tick_vals:
+        x, y = ternary_to_cart(v, 0, N_TOTAL - v)
+        ax.plot([x, x + tl * nx_l], [y, y + tl * ny_l],
+                'k-', lw=0.8, zorder=5, clip_on=False)
+        ax.text(x + (tl + 0.008) * nx_l, y + (tl + 0.008) * ny_l,
+                str(v), fontsize=11, ha='right', va='center')
+
+    # 右边 (Passive n_p): BR(0) → Top(50)
+    # 向外法向量: (H_TRI, 0.5)
+    nx_r, ny_r = H_TRI, 0.5
+    for v in tick_vals:
+        x, y = ternary_to_cart(0, N_TOTAL - v, v)
+        ax.plot([x, x + tl * nx_r], [y, y + tl * ny_r],
+                'k-', lw=0.8, zorder=5, clip_on=False)
+        ax.text(x + (tl + 0.008) * nx_r, y + (tl + 0.008) * ny_r,
+                str(v), fontsize=11, ha='left', va='center')
+
+    # ── 边标签 ──
+    mx, my = 0.5 * (0 + 0.5), 0.5 * (0 + H_TRI)
+    ax.text(mx - 0.14, my, r"$\leftarrow$ Generators", fontsize=15,
+            ha='center', va='center', rotation=60)
+    ax.text(0.5, -0.11, r"Consumers $\rightarrow$", fontsize=15,
+            ha='center', va='top')
+    mx, my = 0.5 * (1 + 0.5), 0.5 * (0 + H_TRI)
+    ax.text(mx + 0.14, my, r"$\leftarrow$ Passive", fontsize=15,
+            ha='center', va='center', rotation=-60)
+
+    # ── 截面线标注 ──
     section_colors = ["#d62728", "#9467bd", "#17becf"]
     for i, (np_val, pct_str) in enumerate(NP_SECTIONS):
-        # 截面线: 固定 np_val, ng + nc = N_TOTAL - np_val
         n_active = N_TOTAL - np_val
         if n_active < 2:
             continue
@@ -157,13 +241,16 @@ def plot_panel_a(ax):
         x1, y1 = ternary_to_cart(0, n_active, np_val)
         ax.plot([x0, x1], [y0, y1], '--', color=section_colors[i],
                 lw=2.5, zorder=3)
-        # 标注在线段正中间，白底衬托
         xm = 0.5 * (x0 + x1)
         ym = 0.5 * (y0 + y1)
         ax.text(xm, ym, f"$n_p$={np_val}", fontsize=14, color=section_colors[i],
                 ha='center', va='center', fontweight='bold',
                 bbox=dict(fc='white', ec='none', alpha=0.8, pad=1.5))
 
+    ax.set_xlim(-0.18, 1.18)
+    ax.set_ylim(-0.14, H_TRI + 0.06)
+    ax.set_aspect('equal')
+    ax.axis('off')
     ax.set_title("K=4, q=0 (baseline)", fontsize=17, pad=8)
 
 
@@ -231,7 +318,7 @@ def main():
     print(f"加载 {len(df)} 行数据")
 
     fig = plt.figure(figsize=(22, 4.5))
-    gs = fig.add_gridspec(1, 4, width_ratios=[1.3, 1, 1, 1],
+    gs = fig.add_gridspec(1, 4, width_ratios=[1.5, 1, 1, 1],
                           left=0.04, right=0.98, top=0.92, bottom=0.14,
                           wspace=0.30)
     axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
