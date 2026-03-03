@@ -148,24 +148,29 @@ def _find_kappa_c_lower(A, P, n, tol=KAPPA_TOL):
             return KAPPA_MIN / 5, y_ok
         kappa_fail = KAPPA_MIN / 5
 
-    # Phase 2: Bisection
+    # Phase 2: Bisection — 多次随机 IC 避免卡在 bracket 边界
     iterations = 0
     while (kappa_ok - kappa_fail) > tol and iterations < 40:
         kappa_mid = (kappa_fail + kappa_ok) / 2.0
+        # 先用 warm-start
         converged, y_sol = _integrate_swing(A, P, n, kappa_mid, y_ok, t_max=150.0)
         if converged:
             kappa_ok = kappa_mid
             y_ok = y_sol
         else:
-            # 也尝试随机 IC
-            converged2, y_sol2 = _integrate_swing(
-                A, P, n, kappa_mid,
-                np.random.rand(2 * n) * 0.1, t_max=200.0,
-            )
-            if converged2:
-                kappa_ok = kappa_mid
-                y_ok = y_sol2
-            else:
+            # 尝试多个随机 IC
+            found_mid = False
+            for _ in range(N_IC_TRIES):
+                y0_rand = np.random.rand(2 * n) * 0.1
+                converged2, y_sol2 = _integrate_swing(
+                    A, P, n, kappa_mid, y0_rand, t_max=200.0,
+                )
+                if converged2:
+                    kappa_ok = kappa_mid
+                    y_ok = y_sol2
+                    found_mid = True
+                    break
+            if not found_mid:
                 kappa_fail = kappa_mid
         iterations += 1
 

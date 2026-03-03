@@ -74,7 +74,7 @@ def main():
                  ha="center", va="top", fontweight="bold")
 
     ax1.set_xlabel("Hour of Day", fontsize=13)
-    ax1.set_ylabel(r"Critical Coupling $\kappa_c$ (kW)", fontsize=13)
+    ax1.set_ylabel(r"Critical Coupling $\kappa_c$", fontsize=13)
     ax1.set_xticks(hours)
     ax1.set_xlim(-0.5, 23.5)
     ax1.grid(True, alpha=0.3, linestyle="--")
@@ -96,11 +96,7 @@ def main():
     ax2.legend(pv_handles, ["PV generation (dashed)"],
                loc="upper right", fontsize=9, framealpha=0.7)
 
-    fig.suptitle(
-        r"Diurnal Critical Coupling $\kappa_c(h)$: Summer vs Winter",
-        fontsize=14, fontweight="bold", y=0.98,
-    )
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.tight_layout()
 
     out_path = RESULTS_DIR / "kappa_diurnal.png"
     fig.savefig(out_path, dpi=DPI, bbox_inches="tight")
