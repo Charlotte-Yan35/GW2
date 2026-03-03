@@ -12,7 +12,6 @@ shared_diurnal_utils.py — 数据加载与注入向量构建。
   - PCC 吸收/补偿剩余功率: P[0] = -sum(P[1:])
 """
 
-import pickle
 import numpy as np
 import pandas as pd
 
@@ -48,7 +47,7 @@ def load_pv_generation() -> dict[str, np.ndarray]:
 def load_household_demand_profiles() -> dict[str, pd.DataFrame]:
     """加载 LCL 数据，计算各户各季各小时平均用电。
 
-    缓存到 cache/household_demand_{season}.pkl
+    缓存到 cache/household_demand_{season}.parquet (跨 numpy 版本兼容)
 
     Returns
     -------
@@ -59,10 +58,9 @@ def load_household_demand_profiles() -> dict[str, pd.DataFrame]:
     all_cached = True
 
     for season, months in SEASONS.items():
-        cache_path = CACHE_DIR / f"household_demand_{season}.pkl"
+        cache_path = CACHE_DIR / f"household_demand_{season}.parquet"
         if cache_path.exists():
-            with open(cache_path, "rb") as f:
-                result[season] = pickle.load(f)
+            result[season] = pd.read_parquet(cache_path)
             print(f"  [cache hit] {cache_path.name}")
         else:
             all_cached = False
@@ -83,7 +81,7 @@ def load_household_demand_profiles() -> dict[str, pd.DataFrame]:
     df["date"] = df["DateTime"].dt.date
 
     for season, months in SEASONS.items():
-        cache_path = CACHE_DIR / f"household_demand_{season}.pkl"
+        cache_path = CACHE_DIR / f"household_demand_{season}.parquet"
         if cache_path.exists():
             continue
 
@@ -110,8 +108,7 @@ def load_household_demand_profiles() -> dict[str, pd.DataFrame]:
         )
 
         result[season] = hh_hour
-        with open(cache_path, "wb") as f:
-            pickle.dump(hh_hour, f, protocol=pickle.HIGHEST_PROTOCOL)
+        hh_hour.to_parquet(cache_path, index=False)
         print(f"  Saved {cache_path.name} ({hh_hour['hid'].nunique()} households × 24h)")
 
     return result
