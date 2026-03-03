@@ -23,7 +23,7 @@ PV_CSV_PATH = PROJECT_ROOT / "household" / "generation" / "output" / "generation
 N = 50                  # 节点总数 (PCC + households)
 PCC_NODE = 0            # PCC 节点索引
 N_HOUSEHOLDS = 49       # 家庭节点数
-K_WS = 8               # WS 图每节点邻居数
+K_WS = 4               # WS 图每节点邻居数 (同 reference_code)
 Q_WS = 0.1             # WS 图重连概率
 SEED = 42              # 基础随机种子
 
