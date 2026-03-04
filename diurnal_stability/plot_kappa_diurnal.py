@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import RESULTS_DIR, DPI
-from shared_diurnal_utils import load_pv_generation
+from shared_diurnal_utils import load_pv_generation, load_demand_profile
 
 
 def main():
@@ -30,6 +30,7 @@ def main():
 
     df = pd.read_csv(csv_path)
     pv = load_pv_generation()
+    demand = load_demand_profile()
 
     # --- 设置绘图风格 ---
     plt.rcParams.update({
@@ -80,20 +81,23 @@ def main():
     ax1.grid(True, alpha=0.3, linestyle="--")
     ax1.legend(loc="upper left", fontsize=11, framealpha=0.9)
 
-    # --- 次 y 轴: PV 发电曲线 ---
+    # --- 次 y 轴: PV 发电 + 用电曲线 ---
     ax2 = ax1.twinx()
     for season in ["summer", "winter"]:
         ax2.plot(hours, pv[season], color=colors[season],
-                 linewidth=1.2, linestyle="--", alpha=0.4)
-    ax2.set_ylabel("PV Generation (kW)", fontsize=11, color="gray")
+                 linewidth=1.5, linestyle="--", alpha=0.6)
+        ax2.plot(hours, demand[season], color=colors[season],
+                 linewidth=1.5, linestyle=":", alpha=0.6)
+    ax2.set_ylabel("Power (kW)", fontsize=11, color="gray")
     ax2.tick_params(axis="y", labelcolor="gray")
 
-    # PV 图例（手动添加到次轴）
+    # PV + Demand 图例（手动添加到次轴）
     from matplotlib.lines import Line2D
-    pv_handles = [
+    ref_handles = [
         Line2D([0], [0], color="gray", linewidth=1.2, linestyle="--", alpha=0.5),
+        Line2D([0], [0], color="gray", linewidth=1.2, linestyle=":", alpha=0.5),
     ]
-    ax2.legend(pv_handles, ["PV generation (dashed)"],
+    ax2.legend(ref_handles, ["PV generation (dashed)", "Demand (dotted)"],
                loc="upper right", fontsize=9, framealpha=0.7)
 
     fig.tight_layout()

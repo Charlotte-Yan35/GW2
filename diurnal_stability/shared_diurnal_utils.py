@@ -40,6 +40,22 @@ def load_pv_generation() -> dict[str, np.ndarray]:
     }
 
 
+def load_demand_profile() -> dict[str, np.ndarray]:
+    """从缓存 parquet 加载各季节 24h 平均家庭用电曲线。
+
+    Returns
+    -------
+    dict  {"summer": ndarray(24,), "winter": ndarray(24,)}  单位: kW
+    """
+    result = {}
+    for season in SEASONS:
+        cache_path = CACHE_DIR / f"household_demand_{season}.parquet"
+        df = pd.read_parquet(cache_path)
+        hourly_mean = df.groupby("hour")["demand_kw"].mean().sort_index().values
+        result[season] = hourly_mean.astype(float)
+    return result
+
+
 # ====================================================================
 # 2. 家庭用电加载 (从 parquet，带缓存)
 # ====================================================================
