@@ -16,7 +16,7 @@ K_list = [4, 6, 8, 10, 12]           # even degree parameter
 q_list = np.linspace(0, 1, 21)       # rewiring probability
 gamma = 1.0                          # damping coefficient
 kappa_grid = np.linspace(0, 20, 81)  # coupling strength grid
-realizations = 20                    # Monte-Carlo realizations per (K, q)
+realizations = 50                    # Monte-Carlo realizations per (K, q)
 K_ref = 8                            # reference degree for Lorenz / cascade plots
 alpha = 0.2                          # power tolerance for cascade model
 
