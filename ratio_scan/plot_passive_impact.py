@@ -184,7 +184,7 @@ def plot_panel_a(ax):
         tcf.set_clip_path(clip_tri)
 
         cb = plt.colorbar(tcf, ax=ax, shrink=0.7, pad=0.02)
-        cb.set_label(r'$\overline{\kappa}_c$', fontsize=16)
+        cb.set_label(r'$\kappa_c$', fontsize=16)
         cb.ax.tick_params(labelsize=13)
 
     # ── 三角形边框 ──
@@ -297,7 +297,7 @@ def plot_section_panel(ax, df, np_val, pct_str, show_legend=False):
     ax.grid(True, alpha=0.3, lw=0.5)
 
     ax.set_xlabel("Consumers ($n_c$)", fontsize=16)
-    ax.set_ylabel(r"$\overline{\kappa}_c$", fontsize=17, rotation=0, labelpad=24)
+    ax.set_ylabel(r"$\kappa_c$", fontsize=17, rotation=0, labelpad=24)
     ax.set_title(f"$n_p$={np_val} ({pct_str} passive)", fontsize=17, pad=8)
     ax.tick_params(labelsize=14)
 
