@@ -59,12 +59,12 @@ NP_SECTIONS = [
 _DPI = 300
 
 plt.rcParams.update({
-    "font.size": 16,
-    "axes.titlesize": 17,
-    "axes.labelsize": 16,
-    "xtick.labelsize": 14,
-    "ytick.labelsize": 14,
-    "legend.fontsize": 13,
+    "font.size": 20,
+    "axes.titlesize": 21,
+    "axes.labelsize": 20,
+    "xtick.labelsize": 18,
+    "ytick.labelsize": 18,
+    "legend.fontsize": 16,
 })
 
 
@@ -97,12 +97,12 @@ def draw_simplex_frame(ax, total=N_TOTAL):
 
     # 边标签
     mx, my = 0.5 * (0 + 0.5), 0.5 * (0 + H_TRI)
-    ax.text(mx - 0.08, my, r"$\leftarrow$ Generators", fontsize=15,
+    ax.text(mx - 0.08, my, r"$\leftarrow$ Generators", fontsize=19,
             ha='center', va='center', rotation=60)
-    ax.text(0.5, -0.07, r"Consumers $\rightarrow$", fontsize=15,
+    ax.text(0.5, -0.07, r"Consumers $\rightarrow$", fontsize=19,
             ha='center', va='top')
     mx, my = 0.5 * (1 + 0.5), 0.5 * (0 + H_TRI)
-    ax.text(mx + 0.08, my, r"$\leftarrow$ Passive", fontsize=15,
+    ax.text(mx + 0.08, my, r"$\leftarrow$ Passive", fontsize=19,
             ha='center', va='center', rotation=-60)
 
     ax.set_xlim(-0.06, 1.06)
@@ -184,8 +184,8 @@ def plot_panel_a(ax):
         tcf.set_clip_path(clip_tri)
 
         cb = plt.colorbar(tcf, ax=ax, shrink=0.7, pad=0.02)
-        cb.set_label(r'$\kappa_c$', fontsize=16)
-        cb.ax.tick_params(labelsize=13)
+        cb.set_label(r'$\kappa_c$', fontsize=20)
+        cb.ax.tick_params(labelsize=16)
 
     # ── 三角形边框 ──
     ax.plot([0, 1, 0.5, 0], [0, 0, H_TRI, 0], 'k-', lw=1.0, zorder=5)
@@ -198,7 +198,7 @@ def plot_panel_a(ax):
     for v in tick_vals:
         x, y = ternary_to_cart(N_TOTAL - v, v, 0)
         ax.plot([x, x], [y, y - tl], 'k-', lw=0.8, zorder=5, clip_on=False)
-        ax.text(x, y - tl - 0.005, str(v), fontsize=11,
+        ax.text(x, y - tl - 0.005, str(v), fontsize=14,
                 ha='center', va='top')
 
     # 左边 (Generators n_g): BL(50) → Top(0)
@@ -209,7 +209,7 @@ def plot_panel_a(ax):
         ax.plot([x, x + tl * nx_l], [y, y + tl * ny_l],
                 'k-', lw=0.8, zorder=5, clip_on=False)
         ax.text(x + (tl + 0.008) * nx_l, y + (tl + 0.008) * ny_l,
-                str(v), fontsize=11, ha='right', va='center')
+                str(v), fontsize=14, ha='right', va='center')
 
     # 右边 (Passive n_p): BR(0) → Top(50)
     # 向外法向量: (H_TRI, 0.5)
@@ -219,16 +219,16 @@ def plot_panel_a(ax):
         ax.plot([x, x + tl * nx_r], [y, y + tl * ny_r],
                 'k-', lw=0.8, zorder=5, clip_on=False)
         ax.text(x + (tl + 0.008) * nx_r, y + (tl + 0.008) * ny_r,
-                str(v), fontsize=11, ha='left', va='center')
+                str(v), fontsize=14, ha='left', va='center')
 
     # ── 边标签 ──
     mx, my = 0.5 * (0 + 0.5), 0.5 * (0 + H_TRI)
-    ax.text(mx - 0.14, my, r"$\leftarrow$ Generators", fontsize=15,
+    ax.text(mx - 0.14, my, r"$\leftarrow$ Generators", fontsize=19,
             ha='center', va='center', rotation=60)
-    ax.text(0.5, -0.11, r"Consumers $\rightarrow$", fontsize=15,
+    ax.text(0.5, -0.11, r"Consumers $\rightarrow$", fontsize=19,
             ha='center', va='top')
     mx, my = 0.5 * (1 + 0.5), 0.5 * (0 + H_TRI)
-    ax.text(mx + 0.14, my, r"$\leftarrow$ Passive", fontsize=15,
+    ax.text(mx + 0.14, my, r"$\leftarrow$ Passive", fontsize=19,
             ha='center', va='center', rotation=-60)
 
     # ── 截面线标注 ──
@@ -243,7 +243,7 @@ def plot_panel_a(ax):
                 lw=2.5, zorder=3)
         xm = 0.5 * (x0 + x1)
         ym = 0.5 * (y0 + y1)
-        ax.text(xm, ym, f"$n_p$={np_val}", fontsize=14, color=section_colors[i],
+        ax.text(xm, ym, f"$n_p$={np_val}", fontsize=17, color=section_colors[i],
                 ha='center', va='center', fontweight='bold',
                 bbox=dict(fc='white', ec='none', alpha=0.8, pad=1.5))
 
@@ -251,7 +251,7 @@ def plot_panel_a(ax):
     ax.set_ylim(-0.14, H_TRI + 0.06)
     ax.set_aspect('equal')
     ax.axis('off')
-    ax.set_title("K=4, q=0 (baseline)", fontsize=17, pad=8)
+    ax.set_title("K=4, q=0 (baseline)", fontsize=21, pad=8)
 
 
 # ====================================================================
@@ -296,10 +296,10 @@ def plot_section_panel(ax, df, np_val, pct_str, show_legend=False):
     ax.spines['right'].set_visible(False)
     ax.grid(True, alpha=0.3, lw=0.5)
 
-    ax.set_xlabel("Consumers ($n_c$)", fontsize=16)
-    ax.set_ylabel(r"$\kappa_c$", fontsize=17, rotation=0, labelpad=24)
-    ax.set_title(f"$n_p$={np_val} ({pct_str} passive)", fontsize=17, pad=8)
-    ax.tick_params(labelsize=14)
+    ax.set_xlabel("Consumers ($n_c$)", fontsize=20)
+    ax.set_ylabel(r"$\kappa_c$", fontsize=21, rotation=0, labelpad=28)
+    ax.set_title(f"$n_p$={np_val} ({pct_str} passive)", fontsize=21, pad=8)
+    ax.tick_params(labelsize=18)
 
     if show_legend:
         return ax.get_legend_handles_labels()
@@ -320,14 +320,14 @@ def main():
     fig = plt.figure(figsize=(22, 4.5))
     gs = fig.add_gridspec(1, 4, width_ratios=[1.5, 1, 1, 1],
                           left=0.04, right=0.98, top=0.92, bottom=0.14,
-                          wspace=0.30)
+                          wspace=0.38)
     axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
 
     # Panel A: simplex heatmap
     print("绘制 Panel A: simplex heatmap ...")
     plot_panel_a(axes[0])
     axes[0].text(-0.08, 1.12, "A", transform=axes[0].transAxes,
-                 fontsize=18, fontweight='bold', va='top', ha='left')
+                 fontsize=22, fontweight='bold', va='top', ha='left')
 
     # Panels B-D: 截面线图
     panel_axes = [axes[1], axes[2], axes[3]]
@@ -341,12 +341,12 @@ def main():
             legend_info = result
         panel_axes[i].text(-0.12, 1.12, panel_labels[i],
                            transform=panel_axes[i].transAxes,
-                           fontsize=18, fontweight='bold', va='top', ha='left')
+                           fontsize=22, fontweight='bold', va='top', ha='left')
 
     # 将 legend 放到 Panel A 下方
     if legend_info:
         handles, labels = legend_info
-        axes[0].legend(handles, labels, fontsize=13, loc='upper center',
+        axes[0].legend(handles, labels, fontsize=16, loc='upper center',
                        bbox_to_anchor=(0.5, -0.05), ncol=2, framealpha=0.9)
 
     out_path = RESULTS_DIR / "fig_passive_impact.png"
